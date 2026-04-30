@@ -205,7 +205,7 @@ See `war-infra` spec for pipeline definitions. This repo triggers:
 - Unit tests (`vitest`)
 - Build (`vite build`) — must succeed
 
-**On merge to `main`:**
+**On merge to `master`:**
 - Build
 - Upload `dist/` to CDN (staging)
 - Smoke test (Playwright: load home page, verify API response renders)

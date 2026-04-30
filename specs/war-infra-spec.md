@@ -68,7 +68,7 @@ war-infra/
 
 | Environment | Purpose | Deployment trigger |
 |---|---|---|
-| **staging** | Pre-production testing | Merge to `main` in any app repo |
+| **staging** | Pre-production testing | Merge to `master` in any app repo |
 | **production** | Live platform | Manual promotion after staging smoke tests pass |
 
 All environments use isolated resources (separate DB, separate CDN distributions, separate object store buckets).
@@ -90,7 +90,7 @@ Each app repo references the pipeline template from this repo using GitHub Actio
 # Example in war-api/.github/workflows/deploy.yml
 jobs:
   deploy:
-    uses: your-org/war-infra/.github/workflows/api.yml@main
+    uses: your-org/war-infra/.github/workflows/api.yml@master
     secrets: inherit
 ```
 
@@ -159,7 +159,7 @@ The CDN origin for `/ui/{slug}/*` is parameterised per slug. When a new custom U
 ### 8.1 `pipelines/api.yml` — war-api
 
 ```
-Trigger: push to main (in war-api repo)
+Trigger: push to master (in war-api repo)
 
 Stages:
   lint          →  eslint + tsc --noEmit
@@ -176,7 +176,7 @@ Stages:
 ### 8.2 `pipelines/ui-default.yml` — war-ui-default
 
 ```
-Trigger: push to main (in war-ui-default repo)
+Trigger: push to master (in war-ui-default repo)
 
 Stages:
   lint          →  eslint
@@ -194,7 +194,7 @@ Stages:
 ### 8.3 `pipelines/ui-custom.yml` — war-ui-{slug}
 
 ```
-Trigger: push to main (in any war-ui-{slug} repo)
+Trigger: push to master (in any war-ui-{slug} repo)
 
 Stages:
   lint          →  eslint (or equivalent)
@@ -212,7 +212,7 @@ Stages:
 ### 8.4 `pipelines/infra.yml` — war-infra
 
 ```
-Trigger: push to main (in war-infra repo)
+Trigger: push to master (in war-infra repo)
 
 Stages:
   validate      →  terraform validate
@@ -344,7 +344,7 @@ Feature: Routing
 
 Feature: CI/CD Pipelines
 
-  Scenario: API deploy pipeline runs all stages on merge to main
+  Scenario: API deploy pipeline runs all stages on merge to master
     Given a merged PR in war-api
     When the pipeline triggers
     Then lint, test, build, and migrate stages all pass
@@ -364,7 +364,7 @@ Feature: CI/CD Pipelines
     And no deployment occurs
 
   Scenario: Infrastructure changes require manual approval for production
-    Given a Terraform change merged to war-infra main
+    Given a Terraform change merged to war-infra master
     When the pipeline reaches the apply-prod stage
     Then it pauses for manual approval
     And only proceeds after a team member approves
