@@ -81,10 +81,12 @@ war-api/
 
 ### OAuth Providers (v1)
 - Google
-- Microsoft Live
+- Apple
 - Facebook
+- Microsoft Live
+- Twitter / X
 
-Extensible to Apple, GitHub, Twitter/X without schema changes.
+Extensible to GitHub, Discord, etc. without schema changes.
 
 ### Identity Rules
 - Each (provider, provider_user_id) pair maps to exactly one `voters` record
@@ -134,7 +136,7 @@ A voter's pick in a Matchup. Append-only. The active vote is the latest record w
 ```sql
 voters (
   id               UUID PRIMARY KEY,
-  provider         VARCHAR(32) NOT NULL,
+  provider         VARCHAR(32) NOT NULL,       -- 'google' | 'apple' | 'facebook' | 'microsoft' | 'twitter'
   provider_user_id VARCHAR(256) NOT NULL,
   display_name     VARCHAR(256),
   avatar_url       TEXT,

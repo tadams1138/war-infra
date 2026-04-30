@@ -235,10 +235,14 @@ All secrets are stored in **AWS Secrets Manager** (or equivalent) and injected i
 | `REFRESH_TOKEN_SECRET` | war-api | Refresh token signing key |
 | `GOOGLE_CLIENT_ID` | war-api | Google OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | war-api | Google OAuth client secret |
-| `MICROSOFT_CLIENT_ID` | war-api | Microsoft OAuth client ID |
-| `MICROSOFT_CLIENT_SECRET` | war-api | Microsoft OAuth client secret |
+| `APPLE_CLIENT_ID` | war-api | Apple OAuth client ID |
+| `APPLE_CLIENT_SECRET` | war-api | Apple OAuth client secret |
 | `FACEBOOK_CLIENT_ID` | war-api | Facebook OAuth client ID |
 | `FACEBOOK_CLIENT_SECRET` | war-api | Facebook OAuth client secret |
+| `MICROSOFT_CLIENT_ID` | war-api | Microsoft OAuth client ID |
+| `MICROSOFT_CLIENT_SECRET` | war-api | Microsoft OAuth client secret |
+| `TWITTER_CLIENT_ID` | war-api | Twitter / X OAuth client ID |
+| `TWITTER_CLIENT_SECRET` | war-api | Twitter / X OAuth client secret |
 | `S3_MEDIA_BUCKET` | war-api | S3 bucket name for contestant images |
 | `CDN_BASE_URL` | war-api | Base URL for CDN (used to construct image URLs) |
 | `VITE_API_BASE_URL` | war-ui-* | API base URL (injected at build time) |
