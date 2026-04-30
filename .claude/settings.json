@@ -29,7 +29,7 @@
     "disableBypassPermissionsMode": "disable"
   },
   "attribution": {
-    "commit": "",
-    "pr": ""
+    "commits": false,
+    "pullRequests": false
   }
 }
