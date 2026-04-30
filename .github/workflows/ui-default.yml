@@ -1,0 +1,43 @@
+name: war-ui-default Pipeline
+
+on:
+  workflow_call:
+    inputs:
+      deploy:
+        type: boolean
+        default: false
+
+jobs:
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "lint"
+      - run: echo "typecheck"
+      - run: echo "test"
+      - run: echo "build"
+
+  deploy-staging:
+    name: Deploy → Staging
+    needs: ci
+    if: inputs.deploy
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "upload to S3 (staging)"
+      - run: echo "invalidate CloudFront (staging)"
+      - run: echo "smoke test (staging)"
+
+  deploy-production:
+    name: Deploy → Production
+    needs: deploy-staging
+    if: inputs.deploy
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "upload to S3 (production)"
+      - run: echo "invalidate CloudFront (production)"
+      - run: echo "smoke test (production)"

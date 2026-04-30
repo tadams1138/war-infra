@@ -1,0 +1,37 @@
+name: war-infra Pipeline
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "terraform validate"
+      - run: echo "terraform plan (staging)"
+      - run: echo "terraform plan (production)"
+
+  apply-staging:
+    name: Apply → Staging
+    needs: validate
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "terraform apply (staging)"
+
+  apply-production:
+    name: Apply → Production
+    needs: apply-staging
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "terraform apply (production)"

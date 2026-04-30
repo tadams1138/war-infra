@@ -1,0 +1,45 @@
+name: war-api Pipeline
+
+on:
+  workflow_call:
+    inputs:
+      deploy:
+        type: boolean
+        default: false
+
+jobs:
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "lint"
+      - run: echo "typecheck"
+      - run: echo "test"
+      - run: echo "docker build"
+      - if: inputs.deploy
+        run: echo "docker push"
+
+  deploy-staging:
+    name: Deploy → Staging
+    needs: ci
+    if: inputs.deploy
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "db migrate (staging)"
+      - run: echo "deploy to ECS (staging)"
+      - run: echo "smoke test (staging)"
+
+  deploy-production:
+    name: Deploy → Production
+    needs: deploy-staging
+    if: inputs.deploy
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "db migrate (production)"
+      - run: echo "deploy to ECS (production)"
+      - run: echo "smoke test (production)"
