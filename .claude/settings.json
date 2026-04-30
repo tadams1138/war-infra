@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(git push*)",
+      "Bash(sudo:*)",
+      "Bash(su:*)",
+      "Bash(rm -rf*)",
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(ssh:*)",
+      "Read(**/.env)",
+      "Read(**/*.key)",
+      "Read(**/*.pem)"
+    ],
+    "ask": [
+      "Bash(git commit*)",
+      "Bash(npm install*)",
+      "Bash(apt*)"
+    ],
+    "allow": [
+      "Bash(git status*)",
+      "Bash(git log*)",
+      "Bash(git diff*)",
+      "Bash(git branch*)",
+      "Bash(npm run*)",
+      "Bash(ls*)",
+      "Bash(cat*)"
+    ],
+    "disableBypassPermissionsMode": "disable"
+  },
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  }
+}
