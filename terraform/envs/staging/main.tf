@@ -26,7 +26,7 @@ terraform {
 
 locals {
   env    = "staging"
-  domain = "staging.war.app"
+  domain = "staging.war.tmore.dev"
 }
 
 # ── Credentials ───────────────────────────────────────────────────────────────

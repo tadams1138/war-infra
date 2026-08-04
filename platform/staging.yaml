@@ -17,7 +17,7 @@ name: war-staging
 region: nyc
 
 domains:
-  - domain: staging.war.app
+  - domain: staging.war.tmore.dev
     type: PRIMARY
 
 # Attaching the cluster makes App Platform add this app to the database's
@@ -79,10 +79,10 @@ services:
         value: ${db.DATABASE_URL}
       - key: PUBLIC_BASE_URL
         scope: RUN_TIME
-        value: https://staging.war.app
+        value: https://staging.war.tmore.dev
       - key: CDN_BASE_URL
         scope: RUN_TIME
-        value: https://staging.war.app/media
+        value: https://staging.war.tmore.dev/media
       - key: STORAGE_ENDPOINT
         scope: RUN_TIME
         value: https://nyc3.digitaloceanspaces.com
@@ -170,7 +170,7 @@ static_sites:
     envs:
       - key: VITE_API_BASE_URL
         scope: BUILD_TIME
-        value: https://staging.war.app/api/v1
+        value: https://staging.war.tmore.dev/api/v1
 
 # Runs before the new revision receives traffic, while the previous one is still
 # serving. A non-zero exit aborts the deployment (spec §10), which is why the

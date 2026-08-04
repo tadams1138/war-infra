@@ -26,7 +26,7 @@ terraform {
 
 locals {
   env    = "production"
-  domain = "war.app"
+  domain = "war.tmore.dev"
 }
 
 # ── Credentials ───────────────────────────────────────────────────────────────

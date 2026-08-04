@@ -123,8 +123,8 @@ All environments use isolated resources: separate application deployment, separa
 
 | Environment | Hostname |
 |---|---|
-| staging | `staging.war.app` |
-| production | `war.app` |
+| staging | `staging.war.tmore.dev` |
+| production | `war.tmore.dev` |
 
 ---
 
@@ -500,7 +500,7 @@ war-media-{env}/
 └── originals/{contestant_id}/{image_id}.{ext}          (private, never served)
 ```
 
-- Served via the edge at `https://war.app/media/contestants/{contestant_id}/{image_id}-{width}.webp`
+- Served via the edge at `https://war.tmore.dev/media/contestants/{contestant_id}/{image_id}-{width}.webp`
 - Uploads are handled server-side by the API using any S3-compatible SDK against the storage endpoint
 - Variants are public-read; no signed URL required for display
 - **Originals are private** and retained only so variant widths can be changed later without re-uploading. The `originals/` prefix is not routed at the edge (§6)
@@ -751,7 +751,7 @@ The API deploy uses `apps update` rather than `create-deployment` because it mus
 | Variable | Description |
 |---|---|
 | `DO_APP_ID` | App Platform app id for that environment |
-| `PUBLIC_BASE_URL` | `https://staging.war.app` or `https://war.app`; used for smoke tests and cache purge |
+| `PUBLIC_BASE_URL` | `https://staging.war.tmore.dev` or `https://war.tmore.dev`; used for smoke tests and cache purge |
 
 **Approval gates** are GitHub Environment protection rules — a required reviewer on the `production` environment. They are deliberately not steps inside any workflow file, so the gate cannot be bypassed by editing a pipeline.
 

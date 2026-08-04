@@ -7,7 +7,7 @@
 #
 # Per-environment GitHub Environment variables:
 #   DO_APP_ID          App Platform app id for that environment
-#   PUBLIC_BASE_URL    https://staging.war.app | https://war.app
+#   PUBLIC_BASE_URL    https://staging.war.tmore.dev | https://war.tmore.dev
 #
 # The production approval gate is a required reviewer on the `production`
 # GitHub Environment, not a step in this file.
