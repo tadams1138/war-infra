@@ -1,3 +1,17 @@
+# war-api pipeline — see specs/war-infra-spec.md §8.1
+#
+# Prerequisites not yet present in this repo:
+#   - platform/{staging,production}.yaml   App Platform specs containing a ${IMAGE_TAG} placeholder
+#   - Terraform must set `lifecycle { ignore_changes = [...service image tag] }` on the app,
+#     so this pipeline owns the image tag and `terraform apply` does not revert it.
+#
+# Per-environment GitHub Environment variables:
+#   DO_APP_ID          App Platform app id for that environment
+#   PUBLIC_BASE_URL    https://staging.war.app | https://war.app
+#
+# The production approval gate is a required reviewer on the `production`
+# GitHub Environment, not a step in this file.
+
 name: war-api Pipeline
 
 on:
@@ -7,39 +21,156 @@ on:
         type: boolean
         default: false
 
+env:
+  REGISTRY: registry.digitalocean.com/war
+  IMAGE_NAME: war-api
+  NODE_VERSION: '22'
+  INFRA_REPO: tadams1138/war-infra
+
 jobs:
   ci:
     name: CI
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: war_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/war_test
+
     steps:
       - uses: actions/checkout@v4
-      - run: echo "lint"
-      - run: echo "typecheck"
-      - run: echo "test"
-      - run: echo "docker build"
-      - if: inputs.deploy
-        run: echo "docker push"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Apply migrations to test database
+        run: npm run migrate
+
+      - name: Test (unit + integration)
+        run: npm test
+
+  build:
+    name: Build image
+    needs: ci
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Authenticate to DigitalOcean
+        if: inputs.deploy
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Log in to container registry
+        if: inputs.deploy
+        run: doctl registry login --expiry-seconds 1800
+
+      # On pull requests the image is built but not pushed. That still proves the
+      # Dockerfile is sound before a change can merge.
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ inputs.deploy }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   deploy-staging:
     name: Deploy → Staging
-    needs: ci
+    needs: build
     if: inputs.deploy
     runs-on: ubuntu-latest
-    environment: staging
+    environment:
+      name: staging
+      url: ${{ vars.PUBLIC_BASE_URL }}
+
     steps:
-      - uses: actions/checkout@v4
-      - run: echo "db migrate (staging)"
-      - run: echo "deploy to ECS (staging)"
-      - run: echo "smoke test (staging)"
+      - name: Check out infrastructure repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.INFRA_REPO }}
+          ref: master
+          path: infra
+
+      - uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Render app spec pinned to this commit's image
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: envsubst < infra/platform/staging.yaml > "$RUNNER_TEMP/app-spec.yaml"
+
+      # --wait blocks until the deployment settles. The PRE_DEPLOY migration job
+      # (spec §10) runs inside it, so a failed migration fails this step and the
+      # previous revision keeps serving traffic.
+      - name: Deploy
+        run: doctl apps update "${{ vars.DO_APP_ID }}" --spec "$RUNNER_TEMP/app-spec.yaml" --wait
+
+      - name: Smoke test
+        env:
+          BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
+        run: infra/scripts/smoke-test.sh staging api
 
   deploy-production:
     name: Deploy → Production
     needs: deploy-staging
     if: inputs.deploy
     runs-on: ubuntu-latest
-    environment: production
+    environment:
+      name: production
+      url: ${{ vars.PUBLIC_BASE_URL }}
+
     steps:
-      - uses: actions/checkout@v4
-      - run: echo "db migrate (production)"
-      - run: echo "deploy to ECS (production)"
-      - run: echo "smoke test (production)"
+      - name: Check out infrastructure repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.INFRA_REPO }}
+          ref: master
+          path: infra
+
+      - uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      # Deploys the exact image already validated in staging — never a rebuild.
+      - name: Render app spec pinned to this commit's image
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: envsubst < infra/platform/production.yaml > "$RUNNER_TEMP/app-spec.yaml"
+
+      - name: Deploy
+        run: doctl apps update "${{ vars.DO_APP_ID }}" --spec "$RUNNER_TEMP/app-spec.yaml" --wait
+
+      - name: Smoke test
+        env:
+          BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
+        run: infra/scripts/smoke-test.sh production api

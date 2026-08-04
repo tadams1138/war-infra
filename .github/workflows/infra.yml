@@ -1,3 +1,14 @@
+# war-infra pipeline — see specs/war-infra-spec.md §8.4
+#
+# Spaces provides no state locking (spec §2.1), so the per-environment
+# concurrency groups below are what prevent two applies colliding.
+#
+# The production approval gate is a required reviewer on the `production`
+# GitHub Environment, not a step in this file.
+#
+# Apply re-plans rather than consuming an uploaded plan file: plan output can
+# contain secret values, and artefacts are readable by anyone with repo access.
+
 name: war-infra Pipeline
 
 on:
@@ -10,32 +21,156 @@ on:
     paths-ignore:
       - '**/*.md'
 
+env:
+  TF_VERSION: '1.9.8'
+  TF_IN_AUTOMATION: 'true'
+  TF_INPUT: '0'
+
+  # Spaces credentials for the S3-compatible state backend (spec §15.1)
+  AWS_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
+
+  # Provider credentials
+  TF_VAR_do_token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+  TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  TF_VAR_cloudflare_zone_id: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+  TF_VAR_spaces_access_key: ${{ secrets.SPACES_ACCESS_KEY_ID }}
+  TF_VAR_spaces_secret_key: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
+
+  # Application secrets injected as App Platform encrypted env vars (spec §9)
+  TF_VAR_jwt_secret: ${{ secrets.JWT_SECRET }}
+  TF_VAR_refresh_token_secret: ${{ secrets.REFRESH_TOKEN_SECRET }}
+  TF_VAR_internal_task_token: ${{ secrets.INTERNAL_TASK_TOKEN }}
+  TF_VAR_google_client_id: ${{ secrets.GOOGLE_CLIENT_ID }}
+  TF_VAR_google_client_secret: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+  TF_VAR_apple_client_id: ${{ secrets.APPLE_CLIENT_ID }}
+  TF_VAR_apple_client_secret: ${{ secrets.APPLE_CLIENT_SECRET }}
+  TF_VAR_facebook_client_id: ${{ secrets.FACEBOOK_CLIENT_ID }}
+  TF_VAR_facebook_client_secret: ${{ secrets.FACEBOOK_CLIENT_SECRET }}
+  TF_VAR_microsoft_client_id: ${{ secrets.MICROSOFT_CLIENT_ID }}
+  TF_VAR_microsoft_client_secret: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
+  TF_VAR_twitter_client_id: ${{ secrets.TWITTER_CLIENT_ID }}
+  TF_VAR_twitter_client_secret: ${{ secrets.TWITTER_CLIENT_SECRET }}
+
 jobs:
   validate:
     name: Validate
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
-      - run: echo "terraform validate"
-      - run: echo "terraform plan (staging)"
-      - run: echo "terraform plan (production)"
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Check formatting
+        run: terraform fmt -check -recursive
+
+      - name: Validate modules
+        run: |
+          for env_dir in terraform/envs/*/; do
+            echo "::group::validate ${env_dir}"
+            terraform -chdir="$env_dir" init -backend=false
+            terraform -chdir="$env_dir" validate
+            echo "::endgroup::"
+          done
+
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: latest
+
+      - name: Lint
+        run: |
+          tflint --init
+          tflint --recursive
+
+  plan-staging:
+    name: Plan → Staging
+    needs: validate
+    runs-on: ubuntu-latest
+    concurrency:
+      group: terraform-staging
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Init
+        run: terraform -chdir=terraform/envs/staging init
+
+      # -detailed-exitcode: 0 = no changes, 2 = changes present, 1 = error.
+      - name: Plan
+        run: terraform -chdir=terraform/envs/staging plan -detailed-exitcode || [ $? -eq 2 ]
 
   apply-staging:
     name: Apply → Staging
-    needs: validate
+    needs: plan-staging
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     environment: staging
+    concurrency:
+      group: terraform-staging
+      cancel-in-progress: false
+
     steps:
       - uses: actions/checkout@v4
-      - run: echo "terraform apply (staging)"
 
-  apply-production:
-    name: Apply → Production
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Init
+        run: terraform -chdir=terraform/envs/staging init
+
+      - name: Apply
+        run: terraform -chdir=terraform/envs/staging apply -auto-approve
+
+  plan-production:
+    name: Plan → Production
     needs: apply-staging
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    environment: production
+    concurrency:
+      group: terraform-production
+      cancel-in-progress: false
+
     steps:
       - uses: actions/checkout@v4
-      - run: echo "terraform apply (production)"
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Init
+        run: terraform -chdir=terraform/envs/production init
+
+      - name: Plan
+        run: terraform -chdir=terraform/envs/production plan -detailed-exitcode || [ $? -eq 2 ]
+
+  apply-production:
+    name: Apply → Production
+    needs: plan-production
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: terraform-production
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Init
+        run: terraform -chdir=terraform/envs/production init
+
+      - name: Apply
+        run: terraform -chdir=terraform/envs/production apply -auto-approve

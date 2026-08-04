@@ -1,0 +1,255 @@
+# war-ui-{slug} pipeline — see specs/war-infra-spec.md §8.3
+#
+# Custom UIs deploy straight to object storage. There is no App Platform
+# component, no CDN origin, and no routing rule per slug — every custom UI is a
+# key prefix inside one shared bucket (spec §5.5), so deploying is a file sync
+# and registering a new slug provisions nothing.
+#
+# Called from each war-ui-{slug} repo:
+#
+#   jobs:
+#     pipeline:
+#       uses: tadams1138/war-infra/.github/workflows/ui-custom.yml@master
+#       with:
+#         deploy: true          # false on pull_request
+#       secrets: inherit
+#
+# The slug defaults to the caller's repository name with the `war-ui-` prefix
+# stripped, so war-ui-miss-universe-2026 deploys to the miss-universe-2026
+# prefix. Pass `slug:` explicitly to override.
+#
+# Per-environment GitHub Environment variables:
+#   PUBLIC_BASE_URL    https://staging.war.app | https://war.app
+#
+# The production approval gate is a required reviewer on the `production`
+# GitHub Environment, not a step in this file.
+
+name: war-ui-custom Pipeline
+
+on:
+  workflow_call:
+    inputs:
+      deploy:
+        type: boolean
+        default: false
+      slug:
+        description: Custom UI slug; defaults to the repo name minus the war-ui- prefix
+        type: string
+        default: ''
+      template_dir:
+        description: Directory holding the required mustache templates
+        type: string
+        default: templates
+    outputs:
+      slug:
+        description: The resolved slug this run deployed
+        value: ${{ jobs.ci.outputs.slug }}
+
+env:
+  NODE_VERSION: '22'
+  INFRA_REPO: tadams1138/war-infra
+  SPACES_ENDPOINT: https://nyc3.digitaloceanspaces.com
+  MAX_BUNDLE_BYTES: '2097152' # 2 MiB, per spec §8.3
+
+jobs:
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    outputs:
+      slug: ${{ steps.slug.outputs.slug }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The slug becomes both a storage key prefix and a URL path segment, so it
+      # is validated strictly. An unvalidated slug containing `../` could write
+      # into another custom UI's prefix in the shared bucket.
+      - name: Resolve and validate slug
+        id: slug
+        run: |
+          slug='${{ inputs.slug }}'
+          if [[ -z "$slug" ]]; then
+            slug="${GITHUB_REPOSITORY##*/}"
+            slug="${slug#war-ui-}"
+          fi
+          if [[ ! "$slug" =~ ^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$ ]]; then
+            echo "::error::invalid slug '$slug' — must be 1-64 chars of [a-z0-9-], not starting or ending with a hyphen"
+            exit 1
+          fi
+          echo "slug=$slug" >> "$GITHUB_OUTPUT"
+          echo "Resolved slug: $slug"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      # A custom UI is rendered inside the same pages as the default UI, so it
+      # must supply every template the platform renders.
+      - name: Template check
+        run: |
+          missing=()
+          for template in war-detail vote-mode rankings; do
+            path="${{ inputs.template_dir }}/${template}.mustache"
+            if [[ -f "$path" ]]; then
+              echo "  ok      $path"
+            else
+              missing+=("$path")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            printf '::error::missing required template: %s\n' "${missing[@]}"
+            exit 1
+          fi
+
+      - name: Size check
+        run: |
+          [[ -d dist ]] || { echo "::error::build produced no dist/ directory"; exit 1; }
+          size=$(du -sb dist | cut -f1)
+          limit=${{ env.MAX_BUNDLE_BYTES }}
+          printf 'Bundle: %s bytes (limit %s)\n' "$size" "$limit"
+          if (( size > limit )); then
+            echo "::error::bundle is $((size / 1024)) KiB, over the $((limit / 1024)) KiB limit"
+            exit 1
+          fi
+
+      - name: Upload build
+        if: inputs.deploy
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 1
+
+  deploy-staging:
+    name: Deploy → Staging
+    needs: ci
+    if: inputs.deploy
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: ${{ vars.PUBLIC_BASE_URL }}/ui/${{ needs.ci.outputs.slug }}/
+    env:
+      SLUG: ${{ needs.ci.outputs.slug }}
+      BUCKET: war-ui-custom-staging
+      AWS_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-east-1 # ignored by Spaces; required by the CLI
+
+    steps:
+      - name: Check out infrastructure repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.INFRA_REPO }}
+          ref: master
+          path: infra
+
+      - name: Download build
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      # Two passes, because index.html and the hashed assets need opposite
+      # caching (spec §7). --delete is scoped to this slug's prefix, so it can
+      # never touch another custom UI in the shared bucket.
+      - name: Sync assets
+        run: |
+          aws s3 sync dist/ "s3://${BUCKET}/${SLUG}/" \
+            --endpoint-url "$SPACES_ENDPOINT" \
+            --exclude index.html \
+            --cache-control 'public, max-age=31536000, immutable' \
+            --acl public-read \
+            --delete
+
+      - name: Upload index.html
+        run: |
+          aws s3 cp dist/index.html "s3://${BUCKET}/${SLUG}/index.html" \
+            --endpoint-url "$SPACES_ENDPOINT" \
+            --cache-control 'no-store' \
+            --content-type 'text/html; charset=utf-8' \
+            --acl public-read
+
+      - name: Purge edge cache
+        run: |
+          curl -sS --fail-with-body -X POST \
+            "https://api.cloudflare.com/client/v4/zones/${{ secrets.CLOUDFLARE_ZONE_ID }}/purge_cache" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            --data "$(printf '{"files":["%s/ui/%s/index.html"]}' \
+                      "${{ vars.PUBLIC_BASE_URL }}" "$SLUG")"
+
+      - name: Smoke test
+        env:
+          BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
+        run: infra/scripts/smoke-test.sh staging ui "$SLUG"
+
+  deploy-production:
+    name: Deploy → Production
+    needs: [ci, deploy-staging]
+    if: inputs.deploy
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ vars.PUBLIC_BASE_URL }}/ui/${{ needs.ci.outputs.slug }}/
+    env:
+      SLUG: ${{ needs.ci.outputs.slug }}
+      BUCKET: war-ui-custom-production
+      AWS_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-east-1
+
+    steps:
+      - name: Check out infrastructure repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.INFRA_REPO }}
+          ref: master
+          path: infra
+
+      # Promotes the exact artefact staging validated — never a rebuild.
+      - name: Download build
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Sync assets
+        run: |
+          aws s3 sync dist/ "s3://${BUCKET}/${SLUG}/" \
+            --endpoint-url "$SPACES_ENDPOINT" \
+            --exclude index.html \
+            --cache-control 'public, max-age=31536000, immutable' \
+            --acl public-read \
+            --delete
+
+      - name: Upload index.html
+        run: |
+          aws s3 cp dist/index.html "s3://${BUCKET}/${SLUG}/index.html" \
+            --endpoint-url "$SPACES_ENDPOINT" \
+            --cache-control 'no-store' \
+            --content-type 'text/html; charset=utf-8' \
+            --acl public-read
+
+      - name: Purge edge cache
+        run: |
+          curl -sS --fail-with-body -X POST \
+            "https://api.cloudflare.com/client/v4/zones/${{ secrets.CLOUDFLARE_ZONE_ID }}/purge_cache" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            --data "$(printf '{"files":["%s/ui/%s/index.html"]}' \
+                      "${{ vars.PUBLIC_BASE_URL }}" "$SLUG")"
+
+      - name: Smoke test
+        env:
+          BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
+        run: infra/scripts/smoke-test.sh production ui "$SLUG"

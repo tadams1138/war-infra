@@ -1,0 +1,197 @@
+# App Platform spec — production
+# See specs/war-infra-spec.md §5.2, §6, §15.2
+#
+# THIS FILE IS THE SOURCE OF TRUTH FOR THE APP. Terraform creates the app and
+# then ignores its spec (terraform/modules/compute), because the image tag
+# changes on every merge and pinning it in Terraform would make every
+# application deploy a terraform apply.
+#
+# Applied by the deploy pipelines:
+#   IMAGE_TAG=<sha> envsubst < platform/production.yaml > /tmp/app.yaml
+#   doctl apps update <app-id> --spec /tmp/app.yaml --wait
+#
+# ${IMAGE_TAG} is the only substituted value. It is the commit SHA, so
+# production deploys the exact image staging validated rather than a rebuild.
+
+name: war-production
+region: nyc
+
+domains:
+  - domain: war.app
+    type: PRIMARY
+
+# Attaching the cluster makes App Platform add this app to the database's
+# trusted sources and expose ${db.DATABASE_URL}. That binding resolves to the
+# POOLED connection string — the API must never open a direct connection
+# (spec §5.3).
+databases:
+  - name: db
+    engine: PG
+    cluster_name: war-production-pg
+    production: true
+
+# Path → component routing (spec §6). Order matters: the catch-all is last.
+# /ui/{slug}/* never reaches here — Cloudflare's Worker handles it upstream.
+ingress:
+  rules:
+    - match:
+        path:
+          prefix: /api/v1
+      component:
+        name: war-api
+        preserve_path_prefix: true # forwarded as-is, no rewrite
+
+    - match:
+        path:
+          prefix: /ui/default
+      component:
+        name: war-ui-default
+        rewrite: / # strip the prefix
+
+    - match:
+        path:
+          prefix: /
+      component:
+        name: war-ui-default # catch-all
+
+services:
+  - name: war-api
+    instance_size_slug: professional-xs
+    instance_count: 2
+    http_port: 8080
+
+    image:
+      registry_type: DOCR
+      repository: war-api
+      tag: ${IMAGE_TAG}
+
+    health_check:
+      http_path: /api/v1/health
+      initial_delay_seconds: 10
+      period_seconds: 10
+      failure_threshold: 3
+
+    envs:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        value: ${db.DATABASE_URL}
+      - key: PUBLIC_BASE_URL
+        scope: RUN_TIME
+        value: https://war.app
+      - key: CDN_BASE_URL
+        scope: RUN_TIME
+        value: https://war.app/media
+      - key: STORAGE_ENDPOINT
+        scope: RUN_TIME
+        value: https://nyc3.digitaloceanspaces.com
+      - key: STORAGE_MEDIA_BUCKET
+        scope: RUN_TIME
+        value: war-media-production
+
+      # Secrets. Values are set by Terraform (spec §9) and encrypted at rest;
+      # the literal EV[...] ciphertext App Platform returns is never committed.
+      - key: JWT_SECRET
+        scope: RUN_TIME
+        type: SECRET
+      - key: REFRESH_TOKEN_SECRET
+        scope: RUN_TIME
+        type: SECRET
+      - key: INTERNAL_TASK_TOKEN
+        scope: RUN_TIME
+        type: SECRET
+      - key: STORAGE_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: STORAGE_SECRET
+        scope: RUN_TIME
+        type: SECRET
+      - key: GOOGLE_CLIENT_ID
+        scope: RUN_TIME
+        type: SECRET
+      - key: GOOGLE_CLIENT_SECRET
+        scope: RUN_TIME
+        type: SECRET
+      - key: APPLE_CLIENT_ID
+        scope: RUN_TIME
+        type: SECRET
+      - key: APPLE_CLIENT_SECRET
+        scope: RUN_TIME
+        type: SECRET
+      - key: FACEBOOK_CLIENT_ID
+        scope: RUN_TIME
+        type: SECRET
+      - key: FACEBOOK_CLIENT_SECRET
+        scope: RUN_TIME
+        type: SECRET
+      - key: MICROSOFT_CLIENT_ID
+        scope: RUN_TIME
+        type: SECRET
+      - key: MICROSOFT_CLIENT_SECRET
+        scope: RUN_TIME
+        type: SECRET
+      - key: TWITTER_CLIENT_ID
+        scope: RUN_TIME
+        type: SECRET
+      - key: TWITTER_CLIENT_SECRET
+        scope: RUN_TIME
+        type: SECRET
+
+    alerts:
+      - rule: CPU_UTILIZATION
+        operator: GREATER_THAN
+        value: 80
+        window: FIVE_MINUTES
+      - rule: MEM_UTILIZATION
+        operator: GREATER_THAN
+        value: 80
+        window: FIVE_MINUTES
+      - rule: RESTART_COUNT
+        operator: GREATER_THAN
+        value: 3
+        window: TEN_MINUTES
+
+static_sites:
+  - name: war-ui-default
+    github:
+      repo: tadams1138/war-ui-default
+      branch: master
+      deploy_on_push: false # deploys are pipeline-triggered, never on push
+
+    build_command: npm run build
+    output_dir: dist
+
+    # Returns index.html with HTTP 200 for unmatched paths — this is the
+    # platform half of the SPA fallback rule (spec §6.1). Custom UIs get the
+    # same behaviour from the edge Worker instead.
+    catchall_document: index.html
+
+    envs:
+      - key: VITE_API_BASE_URL
+        scope: BUILD_TIME
+        value: https://war.app/api/v1
+
+# Runs before the new revision receives traffic, while the previous one is still
+# serving. A non-zero exit aborts the deployment (spec §10), which is why the
+# pipeline passes --wait: without it the stage would pass before this ran.
+jobs:
+  - name: migrate
+    kind: PRE_DEPLOY
+    instance_size_slug: basic-xxs
+    instance_count: 1
+    run_command: npm run migrate
+
+    image:
+      registry_type: DOCR
+      repository: war-api
+      tag: ${IMAGE_TAG} # same image as the service; migrations ship with code
+
+    envs:
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        value: ${db.DATABASE_URL}
+
+alerts:
+  - rule: DEPLOYMENT_FAILED
+  - rule: DOMAIN_FAILED

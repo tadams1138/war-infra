@@ -1,3 +1,16 @@
+# war-ui-default pipeline — see specs/war-infra-spec.md §8.2
+#
+# App Platform builds the static site from source on deployment, so the `build`
+# step here is a fast-fail check rather than the artefact that ships. Deploying
+# is therefore just triggering a new deployment — no artefact upload.
+#
+# Per-environment GitHub Environment variables:
+#   DO_APP_ID          App Platform app id for that environment
+#   PUBLIC_BASE_URL    https://staging.war.app | https://war.app
+#
+# The production approval gate is a required reviewer on the `production`
+# GitHub Environment, not a step in this file.
+
 name: war-ui-default Pipeline
 
 on:
@@ -7,37 +20,127 @@ on:
         type: boolean
         default: false
 
+env:
+  NODE_VERSION: '22'
+  INFRA_REPO: tadams1138/war-infra
+
 jobs:
   ci:
     name: CI
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
-      - run: echo "lint"
-      - run: echo "typecheck"
-      - run: echo "test"
-      - run: echo "build"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      # Acceptance tests run against MSW mocks, so they run on every PR without
+      # needing a live API.
+      - name: Acceptance tests
+        run: npm run test:acceptance
+
+      - name: Build
+        run: npm run build
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
 
   deploy-staging:
     name: Deploy → Staging
     needs: ci
     if: inputs.deploy
     runs-on: ubuntu-latest
-    environment: staging
+    environment:
+      name: staging
+      url: ${{ vars.PUBLIC_BASE_URL }}
+
     steps:
-      - uses: actions/checkout@v4
-      - run: echo "upload to S3 (staging)"
-      - run: echo "invalidate CloudFront (staging)"
-      - run: echo "smoke test (staging)"
+      - name: Check out infrastructure repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.INFRA_REPO }}
+          ref: master
+          path: infra
+
+      - uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Deploy
+        run: doctl apps create-deployment "${{ vars.DO_APP_ID }}" --wait
+
+      # Hashed assets are immutable and never need purging; only index.html does.
+      - name: Purge edge cache
+        run: |
+          curl -sS --fail-with-body -X POST \
+            "https://api.cloudflare.com/client/v4/zones/${{ secrets.CLOUDFLARE_ZONE_ID }}/purge_cache" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            --data "$(printf '{"files":["%s/index.html","%s/ui/default/index.html"]}' \
+                      "${{ vars.PUBLIC_BASE_URL }}" "${{ vars.PUBLIC_BASE_URL }}")"
+
+      - name: Smoke test
+        env:
+          BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
+        run: infra/scripts/smoke-test.sh staging ui-default
 
   deploy-production:
     name: Deploy → Production
     needs: deploy-staging
     if: inputs.deploy
     runs-on: ubuntu-latest
-    environment: production
+    environment:
+      name: production
+      url: ${{ vars.PUBLIC_BASE_URL }}
+
     steps:
-      - uses: actions/checkout@v4
-      - run: echo "upload to S3 (production)"
-      - run: echo "invalidate CloudFront (production)"
-      - run: echo "smoke test (production)"
+      - name: Check out infrastructure repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.INFRA_REPO }}
+          ref: master
+          path: infra
+
+      - uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Deploy
+        run: doctl apps create-deployment "${{ vars.DO_APP_ID }}" --wait
+
+      - name: Purge edge cache
+        run: |
+          curl -sS --fail-with-body -X POST \
+            "https://api.cloudflare.com/client/v4/zones/${{ secrets.CLOUDFLARE_ZONE_ID }}/purge_cache" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            --data "$(printf '{"files":["%s/index.html","%s/ui/default/index.html"]}' \
+                      "${{ vars.PUBLIC_BASE_URL }}" "${{ vars.PUBLIC_BASE_URL }}")"
+
+      - name: Smoke test
+        env:
+          BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
+        run: infra/scripts/smoke-test.sh production ui-default

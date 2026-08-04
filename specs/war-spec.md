@@ -18,9 +18,10 @@ Pairwise comparison forces deliberate choices and produces statistically stronge
 ### Goals
 - Provide a clean API layer that serves both the web frontend and future mobile apps identically
 - Support multiple OAuth login providers, each producing a unique, non-mergeable voter identity
-- Allow War creators to configure campaigns with multiple image-rich contestants
+- Allow War creators to configure campaigns with image-rich or short-video contestants
+- Let each campaign describe its contestants with its own fields, so a pageant and a primary are served by the same code
 - Serve voters binary matchups (one at a time) and persist their choices with full history
-- Surface a Win %-based leaderboard accessible to anonymous and authenticated users alike
+- Surface a win-count leaderboard accessible to anonymous and authenticated users alike
 - Maintain a tamper-evident vote audit trail for future analysis
 
 ### Non-Goals (v1)
@@ -31,8 +32,11 @@ Pairwise comparison forces deliberate choices and produces statistically stronge
 - Admin moderation dashboard
 - Paid or promoted Wars
 - Weighted votes (all voters are equal)
+- Changing a vote once cast (votes are final)
 - Comments or reactions on contestants
 - Linking multiple OAuth providers to a single voter account
+- Hosting or transcoding video (video contestants embed third-party players only)
+- Mixing images and video within one campaign
 
 ---
 
@@ -41,7 +45,7 @@ Pairwise comparison forces deliberate choices and produces statistically stronge
 | Role | Description |
 |---|---|
 | **Anonymous Visitor** | Can browse and view rankings of Public Wars; cannot vote |
-| **Voter** | Authenticated user; can join Wars, cast and change votes, view rankings |
+| **Voter** | Authenticated user; can join Wars, cast votes (final — see `war-api-spec.md` §9), view rankings |
 | **War Creator** | A Voter who created a specific War; can manage it through Draft → Active → Closed |
 
 ---
@@ -77,6 +81,7 @@ The system is **API-first**. The backend exposes a versioned REST API that is th
 For detailed specifications see:
 - [`war-api-spec.md`](war-api-spec.md) — REST API, data model, auth, scoring, vote integrity
 - [`war-ui-default-spec.md`](war-ui-default-spec.md) — default web frontend
+- [`war-ui-custom-spec.md`](war-ui-custom-spec.md) — per-brand custom frontends and their template contract
 - [`war-infra-spec.md`](war-infra-spec.md) — hosting, CI/CD, environments
 
 ---
@@ -92,4 +97,5 @@ For detailed specifications see:
 - Paid or promoted Wars
 - Weighted votes
 - Comments or reactions on contestants
-- ELO or Borda count scoring (Win % only for v1)
+- ELO or Borda count scoring (raw win counts only for v1)
+- Changing a vote once cast (votes are final)
