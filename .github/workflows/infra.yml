@@ -62,7 +62,7 @@ jobs:
 
       - name: Validate modules
         run: |
-          for env_dir in terraform/envs/*/; do
+          for env_dir in terraform/shared/ terraform/envs/*/; do
             echo "::group::validate ${env_dir}"
             terraform -chdir="$env_dir" init -backend=false
             terraform -chdir="$env_dir" validate
@@ -78,9 +78,56 @@ jobs:
           tflint --init
           tflint --recursive
 
+  plan-shared:
+    name: Plan → Shared
+    needs: validate
+    runs-on: ubuntu-latest
+    concurrency:
+      group: terraform-shared
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Init
+        run: terraform -chdir=terraform/shared init
+
+      - name: Plan
+        run: terraform -chdir=terraform/shared plan -detailed-exitcode || [ $? -eq 2 ]
+
+  # Account/zone-scoped (registry, Cloudflare zone settings) — applied once,
+  # ahead of either environment. staging and production don't reference this
+  # state directly, but envs/*/compute expects the registry to already exist
+  # by the time it tries to create an app pointing at it (spec §8.5).
+  apply-shared:
+    name: Apply → Shared
+    needs: plan-shared
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: terraform-shared
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Init
+        run: terraform -chdir=terraform/shared init
+
+      - name: Apply
+        run: terraform -chdir=terraform/shared apply -auto-approve
+
   plan-staging:
     name: Plan → Staging
-    needs: validate
+    needs: plan-shared
     runs-on: ubuntu-latest
     concurrency:
       group: terraform-staging
@@ -102,7 +149,7 @@ jobs:
 
   apply-staging:
     name: Apply → Staging
-    needs: plan-staging
+    needs: [plan-staging, apply-shared]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     environment: staging

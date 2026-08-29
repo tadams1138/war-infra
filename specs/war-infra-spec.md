@@ -580,7 +580,7 @@ Signals are grouped by the role that produces them, so a provider change re-poin
 The edge provides:
 
 - **WAF managed rules** — enabled in production
-- **Rate limiting** — applied to `/api/v1/auth/*` (60 requests/60s per address). The Free Cloudflare plan permits exactly one rule in this phase per zone; an equivalent rule for the vote endpoint was dropped for that reason (see `modules/edge/main.tf`) and is not a gap — vote submission is already bounded by the API's own per-voter, per-matchup limits (one vote per side, enforced server-side). Revisit if the plan changes.
+- **Rate limiting** — applied to `/api/v1/auth/*` (10 requests/10s per address — the Free Cloudflare plan only permits a 10-second counting period in this phase, not the original 60s). The Free plan also permits exactly one rule in this phase per zone; an equivalent rule for the vote endpoint was dropped for that reason (see `modules/edge/main.tf`) and is not a gap — vote submission is already bounded by the API's own per-voter, per-matchup limits (one vote per side, enforced server-side). Revisit both constraints if the plan changes.
 - **DDoS mitigation** — always on
 - **Internal endpoint blocking** — `/api/v1/internal/*` rejected for all callers except the scheduler (§12.3)
 
@@ -716,7 +716,7 @@ The Worker calls the API through its origin hostname, bypassing the §6 edge blo
 
 ### 15.5 Edge Configuration
 
-- `/media/*` → Cloudflare **Origin Rule** overriding the origin to the Spaces CDN hostname for `war-media-{env}`
+- `/media/*` → Cloudflare **Worker** route running `edge/media-router.js`; `MEDIA_CDN_ORIGIN` binds to the `war-media-{env}` Spaces CDN hostname. Not an Origin Rule: redirecting to a different origin's hostname needs that rule type's Host Header override, which requires a paid Cloudflare plan; fetching the CDN's own hostname directly needs no such override. The Worker fetches with `cf: { cacheEverything: true, cacheTtl: 31536000 }`, which (per Cloudflare's documented precedence) overrides Cache Rules for this path — the deliberate mechanism for the "cache aggressively" requirement in §7, and one that does not depend on the origin actually sending a long-lived `Cache-Control`. That matters because §11 claims objects are written with one and, as of this writing, `war-api/src/contestants/storage.ts`'s `PutObjectCommand` does not set one — a real gap between spec and code, tracked there, not fixed by this Worker's own fixed TTL. Requires `compatibility_date >= 2025-04-02` on the script for the cache override to take effect.
 - `/ui/*` (excluding `/ui/default/*`) → Cloudflare **Worker** route running `edge/ui-router.js`; `STORAGE_CDN_ORIGIN` binds to the single `war-ui-custom-{env}` Spaces CDN hostname
 - `/api/v1/internal/*` → Cloudflare **WAF custom rule**, action `block`
 - All other paths proxy to the App Platform hostname

@@ -48,9 +48,10 @@ variable "ui_custom_cdn_host" {
 }
 
 locals {
-  # Everything not matched by an origin rule proxies to App Platform, which
+  # Everything not matched by a Worker route proxies to App Platform, which
   # performs the path→component routing in §6.
-  worker_name = "war-ui-router-${var.env}"
+  ui_worker_name    = "war-ui-router-${var.env}"
+  media_worker_name = "war-media-router-${var.env}"
 }
 
 # ── DNS ───────────────────────────────────────────────────────────────────────
@@ -65,54 +66,30 @@ resource "cloudflare_record" "apex" {
   comment = "War ${var.env} — proxied to App Platform"
 }
 
-# ── Origin routing ────────────────────────────────────────────────────────────
+# ── Media router Worker ───────────────────────────────────────────────────────
 # /media/* is served from the media bucket's CDN rather than App Platform.
-# The path prefix is stripped by the rewrite below so bucket keys stay clean.
+# A Worker rather than an Origin Rule: redirecting to a different origin's
+# hostname needs that rule type's Host Header override, which requires a
+# paid Cloudflare plan. Fetching the CDN's own hostname directly (what
+# edge/media-router.js does) needs no such override at all.
 
-resource "cloudflare_ruleset" "origin" {
-  zone_id = var.zone_id
-  name    = "war-${var.env}-origin"
-  kind    = "zone"
-  phase   = "http_request_origin"
+resource "cloudflare_workers_script" "media_router" {
+  account_id         = var.account_id
+  name               = local.media_worker_name
+  content            = file("${path.module}/../../../edge/media-router.js")
+  module             = true
+  compatibility_date = "2025-04-02" # earliest date the Worker's own cf.cacheEverything/cacheTtl are honoured over Cache Rules — required for the aggressive media caching this Worker exists to provide
 
-  rules {
-    description = "Serve /media/* from the media bucket CDN"
-    expression  = "(http.host eq \"${var.domain}\" and starts_with(http.request.uri.path, \"/media/\"))"
-    action      = "route"
-    enabled     = true
-
-    action_parameters {
-      host_header = var.media_cdn_host
-      origin {
-        host = var.media_cdn_host
-      }
-    }
+  plain_text_binding {
+    name = "MEDIA_CDN_ORIGIN"
+    text = "https://${var.media_cdn_host}"
   }
 }
 
-resource "cloudflare_ruleset" "rewrite" {
-  zone_id = var.zone_id
-  name    = "war-${var.env}-rewrite"
-  kind    = "zone"
-  phase   = "http_request_transform"
-
-  rules {
-    description = "Strip the /media prefix before hitting the bucket"
-    expression  = "(http.host eq \"${var.domain}\" and starts_with(http.request.uri.path, \"/media/\"))"
-    action      = "rewrite"
-    enabled     = true
-
-    action_parameters {
-      uri {
-        # regex_replace needs a Business/WAF-Advanced plan; substring() does
-        # the same fixed-prefix strip on Free. "/media" is 6 characters, so
-        # this keeps everything from the slash after it onward.
-        path {
-          expression = "substring(http.request.uri.path, 6)"
-        }
-      }
-    }
-  }
+resource "cloudflare_workers_route" "media_router" {
+  zone_id     = var.zone_id
+  pattern     = "${var.domain}/media/*"
+  script_name = cloudflare_workers_script.media_router.name
 }
 
 # ── Custom UI router Worker ───────────────────────────────────────────────────
@@ -121,10 +98,11 @@ resource "cloudflare_ruleset" "rewrite" {
 # storage cannot do the latter, which is the whole reason this Worker exists.
 
 resource "cloudflare_workers_script" "ui_router" {
-  account_id = var.account_id
-  name       = local.worker_name
-  content    = file("${path.module}/../../../edge/ui-router.js")
-  module     = true
+  account_id         = var.account_id
+  name               = local.ui_worker_name
+  content            = file("${path.module}/../../../edge/ui-router.js")
+  module             = true
+  compatibility_date = "2025-04-02" # pinned for predictable behaviour, matching media_router; this script sets no cf overrides today
 
   plain_text_binding {
     name = "STORAGE_CDN_ORIGIN"
@@ -191,9 +169,12 @@ resource "cloudflare_ruleset" "ratelimit" {
     enabled     = true
 
     ratelimit {
-      characteristics     = ["ip.src", "cf.colo.id"]
-      period              = 60
-      requests_per_period = 60
+      characteristics = ["ip.src", "cf.colo.id"]
+      # Free plan only permits a 10s period ("not entitled to use the period
+      # 60, can only use a period among [10]"). Scaled to preserve the same
+      # average rate as the original 60 requests/60s.
+      period              = 10
+      requests_per_period = 10
       mitigation_timeout  = 300
     }
   }
@@ -210,6 +191,13 @@ resource "cloudflare_ruleset" "cache" {
   # API responses are uncacheable by default. The rankings endpoint is the
   # deliberate exception and sets its own Cache-Control (spec §7.5 of the API
   # spec), which the edge honours because this rule does not override it.
+  #
+  # No rule here for /media/* — it used to set cache = true / respect_origin,
+  # but that's inert now: media_router (above) fetches with its own cf
+  # overrides, and Cloudflare's documented precedence is Worker script
+  # settings over Cache Rules. A rule here would silently do nothing for
+  # every /media/* request and mislead whoever reads it next into thinking
+  # it's what makes media caching work.
   rules {
     description = "Bypass cache for the API, except where it opts in"
     expression  = "(starts_with(http.request.uri.path, \"/api/v1/\") and not http.request.uri.path contains \"/rankings\")"
@@ -220,29 +208,12 @@ resource "cloudflare_ruleset" "cache" {
       cache = false
     }
   }
-
-  rules {
-    description = "Cache media aggressively; keys are content-addressed"
-    expression  = "(starts_with(http.request.uri.path, \"/media/\"))"
-    action      = "set_cache_settings"
-    enabled     = true
-
-    action_parameters {
-      cache = true
-      # `default` is rejected outright alongside respect_origin ("default is
-      # useless in respect_origin mode") - the point of this mode is to defer
-      # to the origin's own Cache-Control (already set to a year, immutable,
-      # for content-addressed variants), not to impose an edge default.
-      edge_ttl {
-        mode = "respect_origin"
-      }
-      browser_ttl {
-        mode = "respect_origin"
-      }
-    }
-  }
 }
 
 output "worker_name" {
   value = cloudflare_workers_script.ui_router.name
+}
+
+output "media_worker_name" {
+  value = cloudflare_workers_script.media_router.name
 }
