@@ -666,6 +666,18 @@ WHERE status = 'active' AND ends_at IS NOT NULL AND ends_at <= now()
 
 ---
 
+### 7.8 Health Check
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/health` | — | Liveness check — process is up and answering HTTP |
+
+**Response `200`:** `{ "status": "ok" }`
+
+No auth, no dependency on the database or object storage. Polled by App Platform's `health_check` (`war-infra-spec.md` §15.2) to decide whether a deployment is serving traffic yet; not meant to reflect downstream health.
+
+---
+
 ## 8. Scoring Algorithm
 
 Contestants are ranked by **raw win count**, descending.
