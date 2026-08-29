@@ -77,23 +77,26 @@ war-infra/
 │   │   └── edge/             # DNS, TLS, routing, cache rules, WAF, rate limits, worker
 │   ├── shared/
 │   │   └── main.tf           # Account/zone-scoped: registry, zone settings (§8.5)
-│   ├── envs/
-│   │   ├── staging/
-│   │   │   └── main.tf       # Backend + module composition
-│   │   └── production/
-│   │       └── main.tf
-│   └── versions.tf           # Provider version pins
+│   └── envs/
+│       ├── staging/
+│       │   └── main.tf       # Backend + module composition
+│       └── production/
+│           └── main.tf
 ├── platform/
 │   ├── staging.yaml          # Application platform deployment spec
 │   └── production.yaml
 ├── edge/
 │   ├── ui-router.js          # Edge function: custom-UI routing + SPA fallback (§6.1)
+│   ├── media-router.js       # Edge function: /media/* → media CDN, edge-cached (§15.5)
 │   └── scheduled-tasks.js    # Edge function: cron-triggered task dispatch (§12)
+├── bootstrap/
+│   └── Dockerfile            # Trivial image compute's app placeholder pins to (§15.2)
 ├── .github/workflows/        # GitHub requires reusable workflows to live here
-│   ├── api.yml               # Reusable pipeline for war-api
-│   ├── ui-default.yml        # Reusable pipeline for war-ui-default
-│   ├── ui-custom.yml         # Reusable pipeline for war-ui-{slug} repos
-│   └── infra.yml             # Pipeline for this repo (Terraform apply)
+│   ├── api.yml                    # Reusable pipeline for war-api
+│   ├── ui-default.yml             # Reusable pipeline for war-ui-default
+│   ├── ui-custom.yml              # Reusable pipeline for war-ui-{slug} repos
+│   ├── infra.yml                  # Pipeline for this repo (Terraform apply)
+│   └── push-bootstrap-image.yml   # One-off: build+push bootstrap/Dockerfile (§15.2)
 ├── scripts/
 │   ├── register-ui.sh        # Register a new custom UI slug
 │   └── smoke-test.sh         # Post-deploy smoke tests
@@ -683,7 +686,7 @@ App Platform serves the deployment on a `*.ondigitalocean.app` hostname, which s
 
 **Concurrent deploys.** `war-api` and `war-ui-default` are separate repos deploying components of the *same* app, and GitHub concurrency groups do not span repositories. App Platform queues concurrent deployment requests, so this is safe in practice, but a UI deploy landing mid-API-deploy will briefly deploy a spec the API pipeline is still updating. Acceptable at current cadence; revisit if deploy frequency rises.
 
-**Bootstrap image.** The placeholder `service.image` Terraform creates the app with is pinned to one specific commit's DOCR image rather than a moving tag like `latest`. On a from-scratch environment the registry (`terraform/shared`) has never had anything pushed to it — App Platform validates that a referenced image actually exists at creation time, so any tag that isn't already present 404s ("Image tag or digest not found") on the first apply, registry existing or not; a real `war-api` CI build has to land in the registry before that first apply can succeed. A public Docker Hub image was tried as a way around that ordering dependency and rejected outright ("Image does not exist or is private") even for a real public image — a known limitation of the provider/DOCKER_HUB combination, not fixable by picking a different image. The pinned commit's image is discarded the moment `platform/{env}.yaml` deploys for real, same as before; only the *source* of the placeholder changed.
+**Bootstrap image.** The placeholder `service.image` Terraform creates the app with must be a real DOCR image that starts and passes App Platform's health check with zero configuration — it cannot be `war-api`'s real image, which requires `DATABASE_URL`, `JWT_SECRET`, and the rest of §9's secrets to even boot and exits non-zero without them, failing the App Platform deployment `digitalocean_app` waits on and so failing `terraform apply` itself (confirmed: pinning it to a real, working `war-api` commit still 500s this way — `DeployContainerExitNonZero`). A public Docker Hub image was tried first, on the theory that any registry-agnostic image sidesteps needing something already pushed to `terraform/shared`'s registry — also rejected outright ("Image does not exist or is private") even for a real public image, a known limitation of the provider/DOCKER_HUB combination, not fixable by picking a different image. `bootstrap/Dockerfile` is what satisfies both constraints at once: a trivial `busybox httpd` image, built and pushed straight into DOCR as `war-api:bootstrap` by the one-off `push-bootstrap-image.yml` workflow (`workflow_dispatch`, not part of any deploy pipeline — rerun manually only if that tag is ever pruned). It is discarded the moment `platform/{env}.yaml` deploys for real, same as any placeholder would be.
 
 ### 15.3 Migrations Hook
 
