@@ -8,6 +8,7 @@ terraform {
   required_providers {
     digitalocean = { source = "digitalocean/digitalocean", version = "~> 2.43" }
     cloudflare   = { source = "cloudflare/cloudflare", version = "~> 4.40" }
+    time         = { source = "hashicorp/time", version = "~> 0.12" }
   }
 
   backend "s3" {
@@ -110,6 +111,26 @@ module "compute" {
   database_cluster_name = module.data.cluster_name
 }
 
+# DO's API can report a just-created app as having no active deployment yet
+# ("Warning: No active deployment found for app"), which leaves
+# default_ingress empty right at the moment digitalocean_app.war's create
+# call returns — and an empty string fails Cloudflare's CNAME content
+# validation ("Content for CNAME record is invalid") in module.edge below.
+# module.compute.app_default_host is that same first read and cannot recover
+# from this by itself; re-reading the app through a data source after a
+# short wait can, since a data source re-fetches from the API at whatever
+# point in the graph it's placed rather than reusing the resource's
+# creation-time read.
+resource "time_sleep" "app_ingress" {
+  depends_on      = [module.compute]
+  create_duration = "30s"
+}
+
+data "digitalocean_app" "war" {
+  app_id     = module.compute.app_id
+  depends_on = [time_sleep.app_ingress]
+}
+
 # ── Edge ──────────────────────────────────────────────────────────────────────
 
 module "edge" {
@@ -119,7 +140,7 @@ module "edge" {
   zone_id            = var.cloudflare_zone_id
   account_id         = var.cloudflare_account_id
   domain             = local.domain
-  app_default_host   = module.compute.app_default_host
+  app_default_host   = data.digitalocean_app.war.default_ingress
   media_cdn_host     = module.storage.media_cdn_host
   ui_custom_cdn_host = module.storage.ui_custom_cdn_host
 }
@@ -131,7 +152,7 @@ module "scheduler" {
 
   env                 = local.env
   account_id          = var.cloudflare_account_id
-  api_origin          = "https://${module.compute.app_default_host}"
+  api_origin          = "https://${data.digitalocean_app.war.default_ingress}"
   internal_task_token = var.internal_task_token
 }
 
