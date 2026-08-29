@@ -71,12 +71,29 @@ services:
       period_seconds: 10
       failure_threshold: 3
 
+    # Overrides the image's own CMD (`node dist/src/server.js`) only to write
+    # DATABASE_CA_CERT to a file first and point Node at it — DO's managed
+    # Postgres presents a cert signed by a cluster-specific private CA, which
+    # isn't in Node's default trust store, so connecting without this fails
+    # outright ("self-signed certificate in certificate chain"). Decomposing
+    # DATABASE_URL was considered instead (some client libraries only pick up
+    # a CA when connection params are passed individually rather than as one
+    # URL) but NODE_EXTRA_CA_CERTS is a lower-touch fix: it extends Node's
+    # trust store for every TLS connection this process makes, so it works
+    # with DATABASE_URL exactly as db.DATABASE_URL already renders it, no
+    # change to how the app or node-pg-migrate (below) construct their
+    # connections.
+    run_command: sh -c 'echo "$DATABASE_CA_CERT" > /tmp/ca-cert.pem && NODE_EXTRA_CA_CERTS=/tmp/ca-cert.pem node dist/src/server.js'
+
     envs:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
         scope: RUN_TIME
         value: ${db.DATABASE_URL}
+      - key: DATABASE_CA_CERT
+        scope: RUN_TIME
+        value: ${db.CA_CERT}
       - key: PUBLIC_BASE_URL
         scope: RUN_TIME
         value: https://staging.war.tmad.dev
@@ -167,7 +184,9 @@ jobs:
     kind: PRE_DEPLOY
     instance_size_slug: basic-xxs
     instance_count: 1
-    run_command: npm run migrate
+    # See the war-api service's run_command above for why: node-pg-migrate
+    # hits the same untrusted-CA failure connecting to DATABASE_URL directly.
+    run_command: sh -c 'echo "$DATABASE_CA_CERT" > /tmp/ca-cert.pem && NODE_EXTRA_CA_CERTS=/tmp/ca-cert.pem npm run migrate'
 
     image:
       registry_type: DOCR
@@ -178,6 +197,9 @@ jobs:
       - key: DATABASE_URL
         scope: RUN_TIME
         value: ${db.DATABASE_URL}
+      - key: DATABASE_CA_CERT
+        scope: RUN_TIME
+        value: ${db.CA_CERT}
 
 alerts:
   - rule: DEPLOYMENT_FAILED
