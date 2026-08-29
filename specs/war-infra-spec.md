@@ -36,6 +36,7 @@
 17. [Out of Scope (v1)](#17-out-of-scope-v1)
 18. [Provider Rationale](#18-provider-rationale)
 19. [Gherkin Acceptance Tests](#19-gherkin-acceptance-tests)
+20. [First Deploy — Lessons Learned](#20-first-deploy--lessons-learned)
 
 ---
 
@@ -1015,3 +1016,38 @@ Feature: Edge Protection
     Then excess requests are rejected before reaching the origin
     And the rate limit event is recorded in edge analytics
 ```
+
+---
+
+## 20. First Deploy — Lessons Learned
+
+Retrospective notes from getting the first real end-to-end deploy working (staging and production both, this repo plus `war-api` and `war-ui-default`). Platform-generic lessons (DigitalOcean, Cloudflare, GitHub Actions behavior that would apply to any project using them) live in this Claude installation's global skills, not here. What follows is specific to *this* project — decisions, gaps, and history someone working on `war` specifically needs to know that a generic platform skill wouldn't tell them.
+
+### 20.1 Everything was wired before anything was proven
+
+The secrets, variables, Terraform modules, and CI/CD pipelines across all three repos were fully built out before a single real deploy was attempted end-to-end. The result: roughly a dozen distinct bugs surfaced all at once, in sequence, only when the first real `Deploy → Staging` run actually tried to go live — each one blocking the next from ever being reached. Several of them (§20.2, §20.3) had been sitting there the whole time; nothing before that point would have caught them, because nothing before that point actually deployed anything real.
+
+**For the next environment or component added to this project**: get one real deploy fully working end-to-end — even a trivial one — before building out the surrounding automation around it. A green CI pipeline that has never actually deployed anything proves much less than it looks like it proves.
+
+### 20.2 `war-ui-default` has no real application yet
+
+As of this writing, `war-ui-default`'s deployed app is a placeholder (`src/main.ts` — a single "War / Coming soon." page), not the real SPA. It exists only so App Platform's `static_sites` build step succeeds — without it, `war-api`'s deploy couldn't go live either, since the API and UI are components of one App Platform app deployed atomically (§5.2). Both staging and production are currently serving this placeholder.
+
+Replace it with the real SPA under `war-ui-default`'s own TDD process (see its `CLAUDE.md`) whenever that work starts. Nothing in the placeholder is meant to survive that — see the "Status: placeholder" section of `war-ui-default/README.md`.
+
+### 20.3 `war-api`'s `master` branch had a 10-year-old, unrelated history
+
+Before this deploy effort, `war-api`'s actual default branch (`master`, what GitHub Actions triggers on) held a single decade-old commit of unrelated legacy `.NET` projects — completely disconnected from where the real Fastify/TypeScript implementation had been developed (an `new-master` branch with unrelated git history). No CI/CD had ever run against real application code as a result; every push to the real implementation's branch was invisible to the pipeline.
+
+This was resolved with a merge that preserves both histories (`git log` on `master` shows a two-parent merge commit whose tree matches `new-master` exactly) rather than discarding the old branch's history outright. If `war-api`'s git history looks unusual — a merge commit with a completely unrelated first-parent history — this is why, and it's expected, not a sign of a bad merge.
+
+### 20.4 `DO_APP_ID` is a manual step after any from-scratch environment apply
+
+Terraform creates the DigitalOcean App (`terraform apply` outputs `app_id`), but nothing pushes that ID anywhere automatically. Each app repo's deploy pipeline reads it from a GitHub Actions **Environment variable** (`DO_APP_ID`, scoped per environment — `staging`/`production` — per repo), which has to be set by hand after `app_id` first exists for that environment:
+
+```bash
+gh variable set DO_APP_ID -R tadams1138/war-api -e <staging|production> --body "<app_id>"
+gh variable set DO_APP_ID -R tadams1138/war-ui-default -e <staging|production> --body "<app_id>"
+```
+
+This is easy to forget precisely because it's a one-time step per environment, done long after the routine of "push code, pipeline deploys it" is established — the failure mode when it's missing (`PUT https://api.digitalocean.com/v2/apps/: 405`, an empty app ID in the URL) doesn't obviously point at a missing GitHub variable. Needed again for any *new* environment this project ever adds beyond staging/production.
