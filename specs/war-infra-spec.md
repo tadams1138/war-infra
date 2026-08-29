@@ -580,7 +580,7 @@ Signals are grouped by the role that produces them, so a provider change re-poin
 The edge provides:
 
 - **WAF managed rules** — enabled in production
-- **Rate limiting** — applied to `/api/v1/auth/*` (60 requests/60s per address). The Free Cloudflare plan permits exactly one rule in this phase per zone; an equivalent rule for the vote endpoint was dropped for that reason (see `modules/edge/main.tf`) and is not a gap — vote submission is already bounded by the API's own per-voter, per-matchup limits (one vote per side, enforced server-side). Revisit if the plan changes.
+- **Rate limiting** — applied to `/api/v1/auth/*` (10 requests/10s per address — the Free Cloudflare plan only permits a 10-second counting period in this phase, not the original 60s). The Free plan also permits exactly one rule in this phase per zone; an equivalent rule for the vote endpoint was dropped for that reason (see `modules/edge/main.tf`) and is not a gap — vote submission is already bounded by the API's own per-voter, per-matchup limits (one vote per side, enforced server-side). Revisit both constraints if the plan changes.
 - **DDoS mitigation** — always on
 - **Internal endpoint blocking** — `/api/v1/internal/*` rejected for all callers except the scheduler (§12.3)
 
