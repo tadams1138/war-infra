@@ -5,6 +5,15 @@
 # excluded from the custom-UI route and /api/v1/internal must be blocked before
 # anything else can route it.
 
+# Required in every module that uses it, not just the root — Terraform does
+# not infer a non-default-namespace provider's source for a child module from
+# the root's required_providers alone.
+terraform {
+  required_providers {
+    cloudflare = { source = "cloudflare/cloudflare" }
+  }
+}
+
 variable "env" {
   type = string
 }

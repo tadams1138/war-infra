@@ -7,6 +7,15 @@
 # There is deliberately no bucket per custom UI. All slugs share one bucket
 # behind one CDN origin, so registering a slug provisions nothing (spec §5.5).
 
+# Required in every module that uses it, not just the root — Terraform does
+# not infer a non-default-namespace provider's source for a child module from
+# the root's required_providers alone.
+terraform {
+  required_providers {
+    digitalocean = { source = "digitalocean/digitalocean" }
+  }
+}
+
 variable "env" {
   type = string
 }

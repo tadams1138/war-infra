@@ -6,6 +6,15 @@
 # by a per-instance client pool exhausts a small cluster's connection limit
 # quickly without one.
 
+# Required in every module that uses it, not just the root — Terraform does
+# not infer a non-default-namespace provider's source for a child module from
+# the root's required_providers alone.
+terraform {
+  required_providers {
+    digitalocean = { source = "digitalocean/digitalocean" }
+  }
+}
+
 variable "env" {
   type        = string
   description = "staging | production"
