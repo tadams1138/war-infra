@@ -93,6 +93,107 @@ resource "cloudflare_zone_settings_override" "war" {
   }
 }
 
+# ── WAF, rate limiting, and cache ─────────────────────────────────────────────
+# Zone-wide, applied once. Cloudflare permits exactly one custom ruleset per
+# phase per zone — staging and production are both subdomains of this one
+# zone (one CLOUDFLARE_ZONE_ID between them), so these used to live in
+# modules/edge and be instantiated once per environment, which fails outright
+# on the second environment's apply ("A similar configuration with rules
+# already exists"). None of the rules below key off a specific env or domain
+# — every match is path-only — so one zone-wide copy covers both
+# environments exactly as intended; only the number of copies changed.
+#
+# Rule ordering matters and is not alphabetical: within a ruleset phase,
+# rules evaluate top to bottom and the first match wins.
+
+resource "cloudflare_ruleset" "firewall" {
+  zone_id = var.cloudflare_zone_id
+  name    = "war-firewall"
+  kind    = "zone"
+  phase   = "http_request_firewall_custom"
+
+  # Internal task endpoints are reachable only by the scheduler, which calls the
+  # App Platform origin directly rather than through this hostname (spec §12.3).
+  rules {
+    description = "Block internal task endpoints from the public internet"
+    expression  = "(starts_with(http.request.uri.path, \"/api/v1/internal/\"))"
+    action      = "block"
+    enabled     = true
+  }
+
+  # Originals exist only for reprocessing and are never served (spec §11).
+  rules {
+    description = "Block direct access to unprocessed image originals"
+    expression  = "(starts_with(http.request.uri.path, \"/media/originals/\"))"
+    action      = "block"
+    enabled     = true
+  }
+}
+
+# Volumetric shedding only. Per-voter limits live in the API, which can decode
+# the JWT the edge cannot (spec §9.4 of war-api-spec.md).
+#
+# Free plan permits exactly one rule in the http_ratelimit phase per zone
+# (apply fails outright past that — "exceeded the maximum number of rules").
+# This originally defined two: vote-submission and auth-endpoint throttles.
+# Auth wins the single slot — credential-stuffing/brute-force volumetric
+# protection has no other backstop, whereas vote submission is already
+# bounded by the API's own per-voter, per-matchup limits (one vote per side,
+# enforced server-side). Revisit if the Cloudflare plan changes.
+resource "cloudflare_ruleset" "ratelimit" {
+  zone_id = var.cloudflare_zone_id
+  name    = "war-ratelimit"
+  kind    = "zone"
+  phase   = "http_ratelimit"
+
+  rules {
+    description = "Throttle auth endpoints per address"
+    expression  = "(starts_with(http.request.uri.path, \"/api/v1/auth/\"))"
+    action      = "block"
+    enabled     = true
+
+    ratelimit {
+      characteristics = ["ip.src", "cf.colo.id"]
+      # Free plan only permits a 10s period and a 10s mitigation timeout
+      # ("not entitled to use the period 60, can only use a period among
+      # [10]", then separately "not entitled to use a mitigation timeout
+      # different from 10"). Rate scaled to preserve the original 60
+      # requests/60s average; mitigation window is just whatever Free allows.
+      period              = 10
+      requests_per_period = 10
+      mitigation_timeout  = 10
+    }
+  }
+}
+
+resource "cloudflare_ruleset" "cache" {
+  zone_id = var.cloudflare_zone_id
+  name    = "war-cache"
+  kind    = "zone"
+  phase   = "http_request_cache_settings"
+
+  # API responses are uncacheable by default. The rankings endpoint is the
+  # deliberate exception and sets its own Cache-Control (spec §7.5 of the API
+  # spec), which the edge honours because this rule does not override it.
+  #
+  # No rule here for /media/* — it used to set cache = true / respect_origin,
+  # but that's inert now: each environment's media_router Worker (modules/edge)
+  # fetches with its own cf overrides, and Cloudflare's documented precedence
+  # is Worker script settings over Cache Rules. A rule here would silently do
+  # nothing for every /media/* request and mislead whoever reads it next into
+  # thinking it's what makes media caching work.
+  rules {
+    description = "Bypass cache for the API, except where it opts in"
+    expression  = "(starts_with(http.request.uri.path, \"/api/v1/\") and not http.request.uri.path contains \"/rankings\")"
+    action      = "set_cache_settings"
+    enabled     = true
+
+    action_parameters {
+      cache = false
+    }
+  }
+}
+
 output "registry_name" {
   value = digitalocean_container_registry.war.name
 }
