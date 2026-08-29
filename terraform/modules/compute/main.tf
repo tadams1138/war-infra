@@ -63,18 +63,26 @@ resource "digitalocean_app" "war" {
 
     # Placeholder only — replaced by platform/{env}.yaml on first deploy.
     #
-    # Pinned to a specific commit's image, not a moving tag. A DOCKER_HUB
-    # reference was tried first and rejected outright ("Image does not exist
-    # or is private") even for a real public image — a known limitation of
-    # this provider/API combination, not a naming problem. DO validates only
-    # that the referenced DOCR image exists, not that it does anything
-    # useful, and this is discarded the moment platform/{env}.yaml deploys
-    # for real — so any tag that actually exists in the registry satisfies
-    # it. This one is war-api's first successful CI build
-    # (github.com/tadams1138/war-api commit 7010c69), pinned by digest-like
-    # SHA tag rather than a symbolic one like "latest" so this reference
-    # stays valid even if that tag is later pruned by a registry cleanup
-    # policy.
+    # This cannot be war-api's real image: it starts with none of
+    # DATABASE_URL, JWT_SECRET, etc. (those only exist once platform/{env}.yaml
+    # deploys for real), and the real app exits non-zero without them, which
+    # fails the App Platform deployment this resource waits on and so fails
+    # `terraform apply` itself. It was tried — war-api's first successful CI
+    # build, pinned by commit SHA — and failed exactly that way
+    # ("DeployContainerExitNonZero").
+    #
+    # A public Docker Hub image was tried before that, as a registry-agnostic
+    # placeholder needing no config either — also rejected outright ("Image
+    # does not exist or is private") even for a real public image, a known
+    # limitation of this provider/API combination for DOCKER_HUB registry_type,
+    # not a naming problem.
+    #
+    # bootstrap/Dockerfile is what actually satisfies both constraints: a real
+    # DOCR image (this provider requires DOCR, full stop), and one trivial
+    # enough to start and pass App Platform's health check with zero
+    # configuration. Published via the one-off push-bootstrap-image.yml
+    # workflow, not any deploy pipeline — re-run that manually if this tag is
+    # ever pruned from the registry.
     service {
       name               = "war-api"
       instance_size_slug = "basic-xxs"
@@ -84,7 +92,7 @@ resource "digitalocean_app" "war" {
       image {
         registry_type = "DOCR"
         repository    = "war-api"
-        tag           = "7010c6970c739575c59cb1a80f11073d72a983e6"
+        tag           = "bootstrap"
       }
     }
 
