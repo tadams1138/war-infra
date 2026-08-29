@@ -1,13 +1,17 @@
 # war-api pipeline — see specs/war-infra-spec.md §8.1
 #
-# Prerequisites not yet present in this repo:
-#   - platform/{staging,production}.yaml   App Platform specs containing a ${IMAGE_TAG} placeholder
-#   - Terraform must set `lifecycle { ignore_changes = [...service image tag] }` on the app,
-#     so this pipeline owns the image tag and `terraform apply` does not revert it.
-#
 # Per-environment GitHub Environment variables:
 #   DO_APP_ID          App Platform app id for that environment
-#   PUBLIC_BASE_URL    https://staging.war.tmore.dev | https://war.tmore.dev
+#   PUBLIC_BASE_URL    https://staging.war.tmad.dev | https://war.tmad.dev
+#
+# war-api repository secrets/variables (spec §9, §15.7) — substituted into
+# platform/{env}.yaml by envsubst on every deploy, same mechanism as
+# ${IMAGE_TAG}:
+#   JWT_SECRET, REFRESH_TOKEN_SECRET, INTERNAL_TASK_TOKEN,
+#   GOOGLE_CLIENT_SECRET   secrets
+#   GOOGLE_CLIENT_ID                       variable (not secret)
+#   SPACES_ACCESS_KEY_ID, SPACES_SECRET_ACCESS_KEY   secrets (same Spaces
+#     credentials used elsewhere; substituted into the spec's S3_* keys)
 #
 # The production approval gate is a required reviewer on the `production`
 # GitHub Environment, not a step in this file.
@@ -127,6 +131,13 @@ jobs:
       - name: Render app spec pinned to this commit's image
         env:
           IMAGE_TAG: ${{ github.sha }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          REFRESH_TOKEN_SECRET: ${{ secrets.REFRESH_TOKEN_SECRET }}
+          INTERNAL_TASK_TOKEN: ${{ secrets.INTERNAL_TASK_TOKEN }}
+          S3_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: envsubst < infra/platform/staging.yaml > "$RUNNER_TEMP/app-spec.yaml"
 
       # --wait blocks until the deployment settles. The PRE_DEPLOY migration job
@@ -165,6 +176,13 @@ jobs:
       - name: Render app spec pinned to this commit's image
         env:
           IMAGE_TAG: ${{ github.sha }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          REFRESH_TOKEN_SECRET: ${{ secrets.REFRESH_TOKEN_SECRET }}
+          INTERNAL_TASK_TOKEN: ${{ secrets.INTERNAL_TASK_TOKEN }}
+          S3_ACCESS_KEY_ID: ${{ secrets.SPACES_ACCESS_KEY_ID }}
+          S3_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: envsubst < infra/platform/production.yaml > "$RUNNER_TEMP/app-spec.yaml"
 
       - name: Deploy

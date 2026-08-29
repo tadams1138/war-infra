@@ -123,8 +123,8 @@ All environments use isolated resources: separate application deployment, separa
 
 | Environment | Hostname |
 |---|---|
-| staging | `staging.war.tmore.dev` |
-| production | `war.tmore.dev` |
+| staging | `staging.war.tmad.dev` |
+| production | `war.tmad.dev` |
 
 ---
 
@@ -441,9 +441,11 @@ Alerts are declared in both the compute module and the YAML. This duplication is
 
 ## 9. Environment Variables & Secrets
 
-Secrets are held as **encrypted environment variables on the application platform**, applied by Terraform and injected into the API container at runtime. They are never stored in any repo.
+Secrets are held as **encrypted environment variables on the application platform**. They are never stored in any repo.
 
-Terraform sources secret values from GitHub Actions secrets passed as `TF_VAR_*` at apply time. Values are marked `sensitive = true` so they are redacted from plan output, and remote state is in a private bucket.
+They reach the app through `platform/{env}.yaml`, not Terraform: that file's `type: SECRET` entries carry no literal value (only a `${PLACEHOLDER}`), and the `war-api` deploy pipeline (`war-infra/.github/workflows/api.yml`) substitutes the current value from a GitHub Actions secret via `envsubst` immediately before every `doctl apps update --spec`, the same way it already substitutes `${IMAGE_TAG}`. Terraform's role is limited to creating the app once with a bootstrap placeholder (§15.2); it never sets or touches these values, so `terraform apply` does not need them and does not redact them.
+
+Because every deploy re-renders the spec from the current secret value, **rotation is just updating the GitHub Actions secret and triggering any deploy** (even a no-op one) — not a separate procedure, and not a `terraform apply`. An unrelated deploy (bumping a dependency, changing an ingress rule) re-submits the same current value along with it, which DO simply re-encrypts; nothing else changes.
 
 | Variable | Used by | Description |
 |---|---|---|
@@ -451,24 +453,21 @@ Terraform sources secret values from GitHub Actions secrets passed as `TF_VAR_*`
 | `JWT_SECRET` | war-api | JWT signing key |
 | `REFRESH_TOKEN_SECRET` | war-api | Refresh token signing key |
 | `INTERNAL_TASK_TOKEN` | war-api, scheduler | Shared secret authenticating scheduled task calls (§12.3) |
-| `GOOGLE_CLIENT_ID` / `_SECRET` | war-api | Google OAuth credentials |
-| `APPLE_CLIENT_ID` / `_SECRET` | war-api | Apple OAuth credentials |
-| `FACEBOOK_CLIENT_ID` / `_SECRET` | war-api | Facebook OAuth credentials |
-| `MICROSOFT_CLIENT_ID` / `_SECRET` | war-api | Microsoft OAuth credentials |
-| `TWITTER_CLIENT_ID` / `_SECRET` | war-api | Twitter / X OAuth credentials |
-| `STORAGE_KEY` / `STORAGE_SECRET` | war-api | Object storage credentials for media uploads |
-| `STORAGE_MEDIA_BUCKET` | war-api | Bucket name for contestant images |
-| `STORAGE_ENDPOINT` | war-api | S3-compatible endpoint for object storage |
-| `CDN_BASE_URL` | war-api | Public base URL used to construct image URLs |
+| `GOOGLE_CLIENT_ID` | war-api | Google OAuth client id — not secret; a plain (non-`SECRET`-type) env var |
+| `GOOGLE_CLIENT_SECRET` | war-api | Google OAuth client secret |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | war-api | Object storage credentials for media uploads (Spaces access key/secret) |
+| `S3_BUCKET` | war-api | Bucket name for contestant images |
+| `S3_ENDPOINT` | war-api | S3-compatible endpoint for object storage |
+| `S3_PUBLIC_BASE_URL` | war-api | Public base URL used to construct image URLs |
 | `VITE_API_BASE_URL` | war-ui-* | API base URL (injected at build time) |
 
-`DATABASE_URL` is bound by the platform from the attached database rather than set manually.
+`DATABASE_URL` is bound by the platform from the attached database rather than set manually. Apple, Facebook, Microsoft, and Twitter/X OAuth credentials are deliberately absent from this table — those providers are out of scope for this slice (§13) and nothing consumes them; add rows here when a provider is actually implemented, not before.
 
 **CI/CD credentials** are held as GitHub Actions secrets: a platform API token (deployments, registry login, IaC), object storage access keys (sync + Terraform backend), and an edge API token with zone ID (DNS/rules management and cache purge). Concrete names are in §15.7.
 
 ### 9.1 Known Limitation
 
-Platform-encrypted environment variables provide encryption at rest but no versioning, rotation, per-component access policy, or access audit trail. Rotation is manual: update the GitHub Actions secret and re-run `terraform apply`, which triggers a redeploy.
+Platform-encrypted environment variables provide encryption at rest but no versioning, per-component access policy, or access audit trail. Rotation history is whatever GitHub Actions' own secret-update log retains — there is no separate audit trail on the DigitalOcean side.
 
 If the secret inventory grows past this — or an audit trail becomes a requirement — introduce a dedicated secrets manager and inject at container start. Deliberately deferred; see §17.
 
@@ -500,7 +499,7 @@ war-media-{env}/
 └── originals/{contestant_id}/{image_id}.{ext}          (private, never served)
 ```
 
-- Served via the edge at `https://war.tmore.dev/media/contestants/{contestant_id}/{image_id}-{width}.webp`
+- Served via the edge at `https://war.tmad.dev/media/contestants/{contestant_id}/{image_id}-{width}.webp`
 - Uploads are handled server-side by the API using any S3-compatible SDK against the storage endpoint
 - Variants are public-read; no signed URL required for display
 - **Originals are private** and retained only so variant widths can be changed later without re-uploading. The `originals/` prefix is not routed at the edge (§6)
@@ -739,19 +738,36 @@ The API deploy uses `apps update` rather than `create-deployment` because it mus
 
 ### 15.7 CI/CD Credential Names
 
-**Repository secrets** (inherited by reusable workflows via `secrets: inherit`):
+These are split by *which repo's own secret store* the pipeline reads them from — not every repo needs every credential. A reusable workflow's `secrets.*`/`vars.*` resolve against the **calling** repo (the one that has `uses: tadams1138/war-infra/.github/workflows/*.yml@master` in its own workflow file), not against `war-infra`, even though the workflow file itself lives there.
+
+**In `war-infra`** (its own `infra.yml` runs directly here, not as a called workflow):
 
 - `DIGITALOCEAN_ACCESS_TOKEN` — `doctl` auth, Terraform provider, registry login
 - `SPACES_ACCESS_KEY_ID`, `SPACES_SECRET_ACCESS_KEY` — object storage sync + Terraform backend
-- `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID` — DNS/rules management, Worker deployment, cache purge
-- The application secrets in §9, passed to Terraform as `TF_VAR_*`
+- `CLOUDFLARE_API_TOKEN` — DNS/rules management, Worker deployment, cache purge
+- `INTERNAL_TASK_TOKEN` — the *only* §9 application secret Terraform actually consumes, passed as `TF_VAR_internal_task_token` to the scheduler module (the Worker cron job needs it to call the internal endpoint). None of the other §9 secrets are Terraform inputs — see below.
 
-**Per-environment GitHub Environment variables** (not secrets — environment-scoped, so `staging` and `production` resolve the same name to different values):
+`CLOUDFLARE_ZONE_ID` and `CLOUDFLARE_ACCOUNT_ID` are not secrets — they're bare identifiers with no access implications on their own (both visible in the Cloudflare dashboard and API responses), so they're repository variables instead, not secrets:
+
+| Variable | Description |
+|---|---|
+| `CLOUDFLARE_ZONE_ID` | Zone id for the domain; used for DNS/rules management, Worker deployment, cache purge |
+| `CLOUDFLARE_ACCOUNT_ID` | Account id; required by the edge and scheduler modules (Workers script/route/cron ownership) |
+
+**In `war-api`** (its `api.yml`-called deploy jobs render `platform/{env}.yaml` via `envsubst`; see §9):
+
+- `JWT_SECRET`, `REFRESH_TOKEN_SECRET`, `INTERNAL_TASK_TOKEN`, `GOOGLE_CLIENT_SECRET` — substituted straight into the rendered app spec at deploy time, never Terraform inputs
+- `SPACES_ACCESS_KEY_ID`, `SPACES_SECRET_ACCESS_KEY` — same Spaces credentials as above, substituted into the spec's `S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY` env keys (the app reads S3-style names; see §9)
+- `GOOGLE_CLIENT_ID` is a repository **variable** here (not a secret — see §9), substituted the same way
+
+`INTERNAL_TASK_TOKEN` therefore exists as a secret in *both* repos, holding the same value, for two different consumers (the scheduler Worker in `war-infra`, the running API container reached via `war-api`'s deploy).
+
+**Per-environment GitHub Environment variables** (environment-scoped, so `staging` and `production` resolve the same name to different values):
 
 | Variable | Description |
 |---|---|
 | `DO_APP_ID` | App Platform app id for that environment |
-| `PUBLIC_BASE_URL` | `https://staging.war.tmore.dev` or `https://war.tmore.dev`; used for smoke tests and cache purge |
+| `PUBLIC_BASE_URL` | `https://staging.war.tmad.dev` or `https://war.tmad.dev`; used for smoke tests and cache purge |
 
 **Approval gates** are GitHub Environment protection rules — a required reviewer on the `production` environment. They are deliberately not steps inside any workflow file, so the gate cannot be bypassed by editing a pipeline.
 

@@ -6,7 +6,7 @@
 #
 # Per-environment GitHub Environment variables:
 #   DO_APP_ID          App Platform app id for that environment
-#   PUBLIC_BASE_URL    https://staging.war.tmore.dev | https://war.tmore.dev
+#   PUBLIC_BASE_URL    https://staging.war.tmad.dev | https://war.tmad.dev
 #
 # The production approval gate is a required reviewer on the `production`
 # GitHub Environment, not a step in this file.
@@ -96,7 +96,7 @@ jobs:
       - name: Purge edge cache
         run: |
           curl -sS --fail-with-body -X POST \
-            "https://api.cloudflare.com/client/v4/zones/${{ secrets.CLOUDFLARE_ZONE_ID }}/purge_cache" \
+            "https://api.cloudflare.com/client/v4/zones/${{ vars.CLOUDFLARE_ZONE_ID }}/purge_cache" \
             -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
             -H "Content-Type: application/json" \
             --data "$(printf '{"files":["%s/index.html","%s/ui/default/index.html"]}' \
@@ -134,7 +134,7 @@ jobs:
       - name: Purge edge cache
         run: |
           curl -sS --fail-with-body -X POST \
-            "https://api.cloudflare.com/client/v4/zones/${{ secrets.CLOUDFLARE_ZONE_ID }}/purge_cache" \
+            "https://api.cloudflare.com/client/v4/zones/${{ vars.CLOUDFLARE_ZONE_ID }}/purge_cache" \
             -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_API_TOKEN }}" \
             -H "Content-Type: application/json" \
             --data "$(printf '{"files":["%s/index.html","%s/ui/default/index.html"]}' \

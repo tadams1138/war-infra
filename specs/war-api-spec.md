@@ -388,9 +388,9 @@ Wherever a contestant appears in a response it carries a `media` array, ordered 
   "display_order": 0,
   "aspect_ratio": 0.75,
   "variants": [
-    { "width": 400,  "url": "https://war.tmore.dev/media/contestants/{cid}/{mid}-400.webp"  },
-    { "width": 800,  "url": "https://war.tmore.dev/media/contestants/{cid}/{mid}-800.webp"  },
-    { "width": 1600, "url": "https://war.tmore.dev/media/contestants/{cid}/{mid}-1600.webp" }
+    { "width": 400,  "url": "https://war.tmad.dev/media/contestants/{cid}/{mid}-400.webp"  },
+    { "width": 800,  "url": "https://war.tmad.dev/media/contestants/{cid}/{mid}-800.webp"  },
+    { "width": 1600, "url": "https://war.tmad.dev/media/contestants/{cid}/{mid}-1600.webp" }
   ]
 }
 ```

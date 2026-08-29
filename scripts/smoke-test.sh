@@ -28,8 +28,8 @@ usage() {
 
 if [[ -z "${BASE_URL:-}" ]]; then
   case "$ENVIRONMENT" in
-    staging)    BASE_URL="https://staging.war.tmore.dev" ;;
-    production) BASE_URL="https://war.tmore.dev" ;;
+    staging)    BASE_URL="https://staging.war.tmad.dev" ;;
+    production) BASE_URL="https://war.tmad.dev" ;;
     *) echo "unknown environment: $ENVIRONMENT" >&2; exit 2 ;;
   esac
 fi

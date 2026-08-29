@@ -26,7 +26,7 @@ variable "region" {
 
 variable "domain" {
   type        = string
-  description = "Public hostname, e.g. staging.war.tmore.dev"
+  description = "Public hostname, e.g. staging.war.tmad.dev"
 }
 
 variable "database_cluster_name" {

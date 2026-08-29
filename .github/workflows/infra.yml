@@ -33,24 +33,17 @@ env:
   # Provider credentials
   TF_VAR_do_token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
   TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-  TF_VAR_cloudflare_zone_id: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+  TF_VAR_cloudflare_zone_id: ${{ vars.CLOUDFLARE_ZONE_ID }}
+  TF_VAR_cloudflare_account_id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
   TF_VAR_spaces_access_key: ${{ secrets.SPACES_ACCESS_KEY_ID }}
   TF_VAR_spaces_secret_key: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
 
-  # Application secrets injected as App Platform encrypted env vars (spec §9)
-  TF_VAR_jwt_secret: ${{ secrets.JWT_SECRET }}
-  TF_VAR_refresh_token_secret: ${{ secrets.REFRESH_TOKEN_SECRET }}
+  # internal_task_token is the only §9 application secret Terraform consumes
+  # (the scheduler module's Worker needs it to call the internal endpoint).
+  # The rest — JWT_SECRET, GOOGLE_CLIENT_ID/SECRET, etc. — are not Terraform
+  # inputs; they're substituted straight into platform/{env}.yaml by the
+  # war-api deploy pipeline's own envsubst step (spec §9, §15.7).
   TF_VAR_internal_task_token: ${{ secrets.INTERNAL_TASK_TOKEN }}
-  TF_VAR_google_client_id: ${{ secrets.GOOGLE_CLIENT_ID }}
-  TF_VAR_google_client_secret: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-  TF_VAR_apple_client_id: ${{ secrets.APPLE_CLIENT_ID }}
-  TF_VAR_apple_client_secret: ${{ secrets.APPLE_CLIENT_SECRET }}
-  TF_VAR_facebook_client_id: ${{ secrets.FACEBOOK_CLIENT_ID }}
-  TF_VAR_facebook_client_secret: ${{ secrets.FACEBOOK_CLIENT_SECRET }}
-  TF_VAR_microsoft_client_id: ${{ secrets.MICROSOFT_CLIENT_ID }}
-  TF_VAR_microsoft_client_secret: ${{ secrets.MICROSOFT_CLIENT_SECRET }}
-  TF_VAR_twitter_client_id: ${{ secrets.TWITTER_CLIENT_ID }}
-  TF_VAR_twitter_client_secret: ${{ secrets.TWITTER_CLIENT_SECRET }}
 
 jobs:
   validate:
