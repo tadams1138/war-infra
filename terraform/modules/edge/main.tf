@@ -170,26 +170,19 @@ resource "cloudflare_ruleset" "firewall" {
 # ── Rate limiting ─────────────────────────────────────────────────────────────
 # Volumetric shedding only. Per-voter limits live in the API, which can decode
 # the JWT the edge cannot (spec §9.4 of war-api-spec.md).
-
+#
+# Free plan permits exactly one rule in the http_ratelimit phase per zone
+# (apply fails outright past that — "exceeded the maximum number of rules").
+# This module originally defined two: vote-submission and auth-endpoint
+# throttles. Auth wins the single slot — credential-stuffing/brute-force
+# volumetric protection has no other backstop, whereas vote submission is
+# already bounded by the API's own per-voter, per-matchup limits (one vote
+# per side, enforced server-side). Revisit if the Cloudflare plan changes.
 resource "cloudflare_ruleset" "ratelimit" {
   zone_id = var.zone_id
   name    = "war-${var.env}-ratelimit"
   kind    = "zone"
   phase   = "http_ratelimit"
-
-  rules {
-    description = "Throttle vote submission per address"
-    expression  = "(http.request.method eq \"POST\" and http.request.uri.path contains \"/matchups/\" and http.request.uri.path contains \"/vote\")"
-    action      = "block"
-    enabled     = true
-
-    ratelimit {
-      characteristics     = ["ip.src", "cf.colo.id"]
-      period              = 60
-      requests_per_period = 300
-      mitigation_timeout  = 60
-    }
-  }
 
   rules {
     description = "Throttle auth endpoints per address"

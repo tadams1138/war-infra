@@ -580,7 +580,7 @@ Signals are grouped by the role that produces them, so a provider change re-poin
 The edge provides:
 
 - **WAF managed rules** — enabled in production
-- **Rate limiting** — applied to the vote endpoint (`POST /api/v1/wars/*/matchups/*/vote`) and `/api/v1/auth/*`; specific limits set alongside the API's own per-voter limits
+- **Rate limiting** — applied to `/api/v1/auth/*` (60 requests/60s per address). The Free Cloudflare plan permits exactly one rule in this phase per zone; an equivalent rule for the vote endpoint was dropped for that reason (see `modules/edge/main.tf`) and is not a gap — vote submission is already bounded by the API's own per-voter, per-matchup limits (one vote per side, enforced server-side). Revisit if the plan changes.
 - **DDoS mitigation** — always on
 - **Internal endpoint blocking** — `/api/v1/internal/*` rejected for all callers except the scheduler (§12.3)
 
@@ -995,8 +995,8 @@ Feature: Data Protection
 
 Feature: Edge Protection
 
-  Scenario: Vote endpoint is rate limited at the edge
-    Given a client issuing vote requests above the configured threshold
+  Scenario: Auth endpoints are rate limited at the edge
+    Given a client issuing requests to /api/v1/auth/* above the configured threshold
     When the requests reach the edge
     Then excess requests are rejected before reaching the origin
     And the rate limit event is recorded in edge analytics
