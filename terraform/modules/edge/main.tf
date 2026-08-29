@@ -104,8 +104,11 @@ resource "cloudflare_ruleset" "rewrite" {
 
     action_parameters {
       uri {
+        # regex_replace needs a Business/WAF-Advanced plan; substring() does
+        # the same fixed-prefix strip on Free. "/media" is 6 characters, so
+        # this keeps everything from the slash after it onward.
         path {
-          expression = "regex_replace(http.request.uri.path, \"^/media/\", \"/\")"
+          expression = "substring(http.request.uri.path, 6)"
         }
       }
     }
@@ -233,9 +236,12 @@ resource "cloudflare_ruleset" "cache" {
 
     action_parameters {
       cache = true
+      # `default` is rejected outright alongside respect_origin ("default is
+      # useless in respect_origin mode") - the point of this mode is to defer
+      # to the origin's own Cache-Control (already set to a year, immutable,
+      # for content-addressed variants), not to impose an edge default.
       edge_ttl {
-        mode    = "respect_origin"
-        default = 31536000
+        mode = "respect_origin"
       }
       browser_ttl {
         mode = "respect_origin"
