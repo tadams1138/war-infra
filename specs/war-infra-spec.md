@@ -154,6 +154,8 @@ jobs:
 
 Each app repo carries exactly two workflows — `pr.yml` (`deploy: false`) and `deploy.yml` (`deploy: true`) — both delegating to the same reusable template here. All pipeline logic lives in this repo; the app repos hold no build or deploy steps of their own.
 
+**`@master` resolves once per run, not per rerun.** A reusable-workflow call like the one above resolves `@master` when the calling run is first *triggered* (a push, a `workflow_dispatch`) and keeps that resolution for the life of that run — re-running an existing run (`gh run rerun`, or the UI's "Re-run failed jobs") does not re-resolve it, even though a checkout step inside that same run that explicitly clones `war-infra`'s live `master` (e.g. to read `platform/{env}.yaml`) does fetch fresh. Concretely: fixing a bug in `api.yml` and then re-running an old, already-failed `deploy.yml` run keeps executing the *old* `api.yml`, silently — the checkout step's fresh clone can make this look like the fix should have applied when it didn't. `deploy.yml` carries a `workflow_dispatch` trigger for exactly this reason: it's a *new* run, so it resolves `@master` fresh. Prefer a fresh trigger over a rerun whenever `api.yml`/`ui-*.yml` changed since the run in question started.
+
 `war-ui-{slug}` repos additionally resolve their slug automatically:
 
 ```yaml
