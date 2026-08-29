@@ -9,8 +9,10 @@
 # not infer a non-default-namespace provider's source for a child module from
 # the root's required_providers alone.
 terraform {
+  required_version = "~> 1.9"
+
   required_providers {
-    cloudflare = { source = "cloudflare/cloudflare" }
+    cloudflare = { source = "cloudflare/cloudflare", version = "~> 4.40" }
   }
 }
 
