@@ -63,14 +63,18 @@ resource "digitalocean_app" "war" {
 
     # Placeholder only — replaced by platform/{env}.yaml on first deploy.
     #
-    # A public Docker Hub image, deliberately not DOCR. This resource is what
-    # creates the registry's only consumer; on a from-scratch environment
-    # nothing has ever pushed anything to it yet, so a DOCR reference here
-    # 404s ("Image tag or digest not found") on every first apply — the
-    # registry existing is not the same as it containing this tag. DO
-    # validates only that the referenced image exists, not that it does
-    # anything useful, and this one is discarded the moment platform/{env}.yaml
-    # deploys for real, so any small, stable public image satisfies it.
+    # Pinned to a specific commit's image, not a moving tag. A DOCKER_HUB
+    # reference was tried first and rejected outright ("Image does not exist
+    # or is private") even for a real public image — a known limitation of
+    # this provider/API combination, not a naming problem. DO validates only
+    # that the referenced DOCR image exists, not that it does anything
+    # useful, and this is discarded the moment platform/{env}.yaml deploys
+    # for real — so any tag that actually exists in the registry satisfies
+    # it. This one is war-api's first successful CI build
+    # (github.com/tadams1138/war-api commit 7010c69), pinned by digest-like
+    # SHA tag rather than a symbolic one like "latest" so this reference
+    # stays valid even if that tag is later pruned by a registry cleanup
+    # policy.
     service {
       name               = "war-api"
       instance_size_slug = "basic-xxs"
@@ -78,9 +82,9 @@ resource "digitalocean_app" "war" {
       http_port          = 8080
 
       image {
-        registry_type = "DOCKER_HUB"
-        repository    = "nginxdemos/hello"
-        tag           = "latest"
+        registry_type = "DOCR"
+        repository    = "war-api"
+        tag           = "7010c6970c739575c59cb1a80f11073d72a983e6"
       }
     }
 
