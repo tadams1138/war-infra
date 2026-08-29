@@ -138,7 +138,21 @@ jobs:
           S3_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
           GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-        run: envsubst < infra/platform/staging.yaml > "$RUNNER_TEMP/app-spec.yaml"
+        # The explicit variable list is load-bearing, not tidiness: envsubst
+        # with no list substitutes every $VAR/${VAR} it finds, and
+        # platform/{env}.yaml's run_command intentionally contains
+        # $DATABASE_CA_CERT as a literal shell reference for the container to
+        # expand at runtime (that's how it reads the platform-bound
+        # ${db.CA_CERT}, which envsubst here has no way to know). An
+        # unrestricted envsubst clobbered it with an empty string before it
+        # ever reached the container -- confirmed via the App Platform
+        # console, which showed the rendered command as `echo ""`, not
+        # `echo "$DATABASE_CA_CERT"`. Every new ${PLACEHOLDER} added to
+        # platform/{env}.yaml for this step to substitute must be added here
+        # too, or it silently stops being substituted instead of erroring.
+        run: |
+          envsubst '$IMAGE_TAG $JWT_SECRET $REFRESH_TOKEN_SECRET $INTERNAL_TASK_TOKEN $S3_ACCESS_KEY_ID $S3_SECRET_ACCESS_KEY $GOOGLE_CLIENT_ID $GOOGLE_CLIENT_SECRET' \
+            < infra/platform/staging.yaml > "$RUNNER_TEMP/app-spec.yaml"
 
       # --wait blocks until the deployment settles. The PRE_DEPLOY migration job
       # (spec §10) runs inside it, so a failed migration fails this step and the
@@ -183,7 +197,11 @@ jobs:
           S3_SECRET_ACCESS_KEY: ${{ secrets.SPACES_SECRET_ACCESS_KEY }}
           GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-        run: envsubst < infra/platform/production.yaml > "$RUNNER_TEMP/app-spec.yaml"
+        # See the staging job's identical step for why the variable list is
+        # required, not optional tidiness.
+        run: |
+          envsubst '$IMAGE_TAG $JWT_SECRET $REFRESH_TOKEN_SECRET $INTERNAL_TASK_TOKEN $S3_ACCESS_KEY_ID $S3_SECRET_ACCESS_KEY $GOOGLE_CLIENT_ID $GOOGLE_CLIENT_SECRET' \
+            < infra/platform/production.yaml > "$RUNNER_TEMP/app-spec.yaml"
 
       - name: Deploy
         run: doctl apps update "${{ vars.DO_APP_ID }}" --spec "$RUNNER_TEMP/app-spec.yaml" --wait
