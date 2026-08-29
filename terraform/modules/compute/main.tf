@@ -117,7 +117,9 @@ output "app_id" {
   value = digitalocean_app.war.id
 }
 
-# The *.ondigitalocean.app hostname. Cloudflare proxies to this; it is never
+# Despite the name, this is the full "https://*.ondigitalocean.app" URL, not
+# a bare hostname — trim the scheme at the point of use if a hostname is what
+# you need (e.g. a CNAME's content). Cloudflare proxies to this; it is never
 # advertised and should not appear in any user-facing URL.
 output "app_default_host" {
   value = digitalocean_app.war.default_ingress

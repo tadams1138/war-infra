@@ -112,15 +112,17 @@ module "compute" {
 }
 
 # DO's API can report a just-created app as having no active deployment yet
-# ("Warning: No active deployment found for app"), which leaves
-# default_ingress empty right at the moment digitalocean_app.war's create
-# call returns — and an empty string fails Cloudflare's CNAME content
-# validation ("Content for CNAME record is invalid") in module.edge below.
-# module.compute.app_default_host is that same first read and cannot recover
-# from this by itself; re-reading the app through a data source after a
-# short wait can, since a data source re-fetches from the API at whatever
-# point in the graph it's placed rather than reusing the resource's
-# creation-time read.
+# ("Warning: No active deployment found for app") right when
+# digitalocean_app.war's create call returns; module.compute.app_default_host
+# is that same first read and cannot recover from a stale value by itself.
+# time_sleep + a fresh data source read guards against that. Separately —
+# and this is what actually broke the DNS record even once the read was
+# fresh — default_ingress is a full URL ("https://<app>.ondigitalocean.app"),
+# not a bare hostname, despite the compute module's own doc comment; a
+# cloudflare_record CNAME's content must be a bare hostname, and prepending
+# "https://" again for scheduler's api_origin would have double-scheme'd it.
+# trimprefix below and the plain read here are both fixes for that, not the
+# sleep/re-read.
 resource "time_sleep" "app_ingress" {
   depends_on      = [module.compute]
   create_duration = "30s"
@@ -140,7 +142,7 @@ module "edge" {
   zone_id            = var.cloudflare_zone_id
   account_id         = var.cloudflare_account_id
   domain             = local.domain
-  app_default_host   = data.digitalocean_app.war.default_ingress
+  app_default_host   = trimprefix(data.digitalocean_app.war.default_ingress, "https://")
   media_cdn_host     = module.storage.media_cdn_host
   ui_custom_cdn_host = module.storage.ui_custom_cdn_host
 }
@@ -152,7 +154,7 @@ module "scheduler" {
 
   env                 = local.env
   account_id          = var.cloudflare_account_id
-  api_origin          = "https://${data.digitalocean_app.war.default_ingress}"
+  api_origin          = data.digitalocean_app.war.default_ingress
   internal_task_token = var.internal_task_token
 }
 
