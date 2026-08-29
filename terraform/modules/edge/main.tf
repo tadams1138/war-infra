@@ -1,9 +1,10 @@
-# Cloudflare edge — see specs/war-infra-spec.md §5.1, §6, §7, §13.1, §13.2
+# Cloudflare edge — per-environment DNS and Worker routing. See
+# specs/war-infra-spec.md §5.1, §6, §7. The zone-wide WAF/rate-limit/cache
+# rulesets (§13.1, §13.2) live in terraform/shared instead, applied once —
+# see that module for why.
 #
-# Rule ordering matters and is not alphabetical. Within a ruleset phase, rules
-# evaluate top to bottom and the first match wins, so /ui/default must be
-# excluded from the custom-UI route and /api/v1/internal must be blocked before
-# anything else can route it.
+# /ui/default/* must reach App Platform, not the ui_router Worker below —
+# that's what its route pattern excludes it for.
 
 # Required in every module that uses it, not just the root — Terraform does
 # not infer a non-default-namespace provider's source for a child module from
@@ -119,98 +120,17 @@ resource "cloudflare_workers_route" "ui_router" {
   script_name = cloudflare_workers_script.ui_router.name
 }
 
-# ── WAF ───────────────────────────────────────────────────────────────────────
-
-resource "cloudflare_ruleset" "firewall" {
-  zone_id = var.zone_id
-  name    = "war-${var.env}-firewall"
-  kind    = "zone"
-  phase   = "http_request_firewall_custom"
-
-  # Internal task endpoints are reachable only by the scheduler, which calls the
-  # App Platform origin directly rather than through this hostname (spec §12.3).
-  rules {
-    description = "Block internal task endpoints from the public internet"
-    expression  = "(starts_with(http.request.uri.path, \"/api/v1/internal/\"))"
-    action      = "block"
-    enabled     = true
-  }
-
-  # Originals exist only for reprocessing and are never served (spec §11).
-  rules {
-    description = "Block direct access to unprocessed image originals"
-    expression  = "(starts_with(http.request.uri.path, \"/media/originals/\"))"
-    action      = "block"
-    enabled     = true
-  }
-}
-
-# ── Rate limiting ─────────────────────────────────────────────────────────────
-# Volumetric shedding only. Per-voter limits live in the API, which can decode
-# the JWT the edge cannot (spec §9.4 of war-api-spec.md).
-#
-# Free plan permits exactly one rule in the http_ratelimit phase per zone
-# (apply fails outright past that — "exceeded the maximum number of rules").
-# This module originally defined two: vote-submission and auth-endpoint
-# throttles. Auth wins the single slot — credential-stuffing/brute-force
-# volumetric protection has no other backstop, whereas vote submission is
-# already bounded by the API's own per-voter, per-matchup limits (one vote
-# per side, enforced server-side). Revisit if the Cloudflare plan changes.
-resource "cloudflare_ruleset" "ratelimit" {
-  zone_id = var.zone_id
-  name    = "war-${var.env}-ratelimit"
-  kind    = "zone"
-  phase   = "http_ratelimit"
-
-  rules {
-    description = "Throttle auth endpoints per address"
-    expression  = "(starts_with(http.request.uri.path, \"/api/v1/auth/\"))"
-    action      = "block"
-    enabled     = true
-
-    ratelimit {
-      characteristics = ["ip.src", "cf.colo.id"]
-      # Free plan only permits a 10s period and a 10s mitigation timeout
-      # ("not entitled to use the period 60, can only use a period among
-      # [10]", then separately "not entitled to use a mitigation timeout
-      # different from 10"). Rate scaled to preserve the original 60
-      # requests/60s average; mitigation window is just whatever Free allows.
-      period              = 10
-      requests_per_period = 10
-      mitigation_timeout  = 10
-    }
-  }
-}
-
-# ── Cache ─────────────────────────────────────────────────────────────────────
-
-resource "cloudflare_ruleset" "cache" {
-  zone_id = var.zone_id
-  name    = "war-${var.env}-cache"
-  kind    = "zone"
-  phase   = "http_request_cache_settings"
-
-  # API responses are uncacheable by default. The rankings endpoint is the
-  # deliberate exception and sets its own Cache-Control (spec §7.5 of the API
-  # spec), which the edge honours because this rule does not override it.
-  #
-  # No rule here for /media/* — it used to set cache = true / respect_origin,
-  # but that's inert now: media_router (above) fetches with its own cf
-  # overrides, and Cloudflare's documented precedence is Worker script
-  # settings over Cache Rules. A rule here would silently do nothing for
-  # every /media/* request and mislead whoever reads it next into thinking
-  # it's what makes media caching work.
-  rules {
-    description = "Bypass cache for the API, except where it opts in"
-    expression  = "(starts_with(http.request.uri.path, \"/api/v1/\") and not http.request.uri.path contains \"/rankings\")"
-    action      = "set_cache_settings"
-    enabled     = true
-
-    action_parameters {
-      cache = false
-    }
-  }
-}
+# WAF, rate limiting, and cache rules used to live here, one copy per
+# environment. They moved to terraform/shared: staging and production are
+# both subdomains of the same Cloudflare zone (one CLOUDFLARE_ZONE_ID, not
+# one per env), and Cloudflare permits exactly one custom ruleset per phase
+# per zone — production's first-ever apply failed outright trying to create
+# a second copy of each ("A similar configuration with rules already
+# exists... overwriting will have unintended consequences"). None of the
+# three ever actually keyed off env or domain in their rule expressions
+# (path-only matches throughout), so moving them to a single zone-wide
+# instance changed nothing about what they do — only how many of them exist.
+# See terraform/shared/main.tf.
 
 output "worker_name" {
   value = cloudflare_workers_script.ui_router.name

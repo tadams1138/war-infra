@@ -430,8 +430,8 @@ Three things own infrastructure, and the boundaries between them are deliberate.
 
 | Owner | Owns | Why not the others |
 |---|---|---|
-| `terraform/shared/` | Container registry, zone-wide TLS and security settings | Account- and zone-scoped; creating either from both environments would conflict |
-| `terraform/envs/{env}/` | Database, buckets, CDN, edge rules, worker, scheduler, **app identity** | Long-lived resources that change on infrastructure review cadence |
+| `terraform/shared/` | Container registry, zone-wide TLS and security settings, WAF/rate-limit/cache rulesets | Account- and zone-scoped; creating any of these from both environments would conflict — Cloudflare permits exactly one custom ruleset per phase per zone, and a from-scratch production apply failed outright the first time this was tried per-environment |
+| `terraform/envs/{env}/` | Database, buckets, CDN, DNS record, per-env Workers (media/UI routing), scheduler, **app identity** | Long-lived resources that change on infrastructure review cadence |
 | `platform/{env}.yaml` | The **application spec** — components, ingress, env vars, migration hook | The image tag changes on every merge; pinning it in Terraform would make every application deploy a `terraform apply` |
 
 **The app is created by Terraform and specified by the YAML.** `modules/compute` creates `digitalocean_app` with a placeholder spec and `lifecycle { ignore_changes = [spec] }`; the first pipeline deploy replaces that spec with the real one and Terraform never reverts it. Without the `ignore_changes`, every `terraform apply` would roll the running API back to the placeholder image.
@@ -590,7 +590,7 @@ Signals are grouped by the role that produces them, so a provider change re-poin
 The edge provides:
 
 - **WAF managed rules** — enabled in production
-- **Rate limiting** — applied to `/api/v1/auth/*` (10 requests/10s per address — the Free Cloudflare plan only permits a 10-second counting period in this phase, not the original 60s). The Free plan also permits exactly one rule in this phase per zone; an equivalent rule for the vote endpoint was dropped for that reason (see `modules/edge/main.tf`) and is not a gap — vote submission is already bounded by the API's own per-voter, per-matchup limits (one vote per side, enforced server-side). Revisit both constraints if the plan changes.
+- **Rate limiting** — applied to `/api/v1/auth/*` (10 requests/10s per address — the Free Cloudflare plan only permits a 10-second counting period in this phase, not the original 60s). The Free plan also permits exactly one rule in this phase per zone; an equivalent rule for the vote endpoint was dropped for that reason (see `terraform/shared/main.tf`) and is not a gap — vote submission is already bounded by the API's own per-voter, per-matchup limits (one vote per side, enforced server-side). Revisit both constraints if the plan changes.
 - **DDoS mitigation** — always on
 - **Internal endpoint blocking** — `/api/v1/internal/*` rejected for all callers except the scheduler (§12.3)
 
