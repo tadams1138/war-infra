@@ -1,1 +1,3 @@
-# war-infra\nInfrastructure, CI/CD pipelines, and project specifications.
+# war-infra
+
+Infrastructure, CI/CD pipelines, and project specifications.
