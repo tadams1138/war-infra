@@ -17,7 +17,7 @@ name: war-staging
 region: nyc
 
 domains:
-  - domain: staging.war.tmore.dev
+  - domain: staging.war.tmad.dev
     type: PRIMARY
 
 # Attaching the cluster makes App Platform add this app to the database's
@@ -79,64 +79,51 @@ services:
         value: ${db.DATABASE_URL}
       - key: PUBLIC_BASE_URL
         scope: RUN_TIME
-        value: https://staging.war.tmore.dev
-      - key: CDN_BASE_URL
+        value: https://staging.war.tmad.dev
+      - key: S3_PUBLIC_BASE_URL
         scope: RUN_TIME
-        value: https://staging.war.tmore.dev/media
-      - key: STORAGE_ENDPOINT
+        value: https://staging.war.tmad.dev/media
+      - key: S3_ENDPOINT
         scope: RUN_TIME
         value: https://nyc3.digitaloceanspaces.com
-      - key: STORAGE_MEDIA_BUCKET
+      - key: S3_BUCKET
         scope: RUN_TIME
         value: war-media-staging
+      - key: GOOGLE_CLIENT_ID
+        scope: RUN_TIME
+        value: ${GOOGLE_CLIENT_ID}
 
-      # Secrets. Values are set by Terraform (spec §9) and encrypted at rest;
-      # the literal EV[...] ciphertext App Platform returns is never committed.
+      # Secrets. Not literal values — ${PLACEHOLDER} substituted from GitHub
+      # Actions secrets by envsubst immediately before this file is applied
+      # (spec §9). Re-rendered fresh on every deploy, so rotating the GitHub
+      # secret and redeploying (even a no-op redeploy) is all rotation takes.
+      # Apple/Facebook/Microsoft/Twitter are absent: unimplemented (spec §13),
+      # so there is nothing to substitute them with — add them here only once
+      # a provider actually exists.
       - key: JWT_SECRET
         scope: RUN_TIME
         type: SECRET
+        value: ${JWT_SECRET}
       - key: REFRESH_TOKEN_SECRET
         scope: RUN_TIME
         type: SECRET
+        value: ${REFRESH_TOKEN_SECRET}
       - key: INTERNAL_TASK_TOKEN
         scope: RUN_TIME
         type: SECRET
-      - key: STORAGE_KEY
+        value: ${INTERNAL_TASK_TOKEN}
+      - key: S3_ACCESS_KEY_ID
         scope: RUN_TIME
         type: SECRET
-      - key: STORAGE_SECRET
+        value: ${S3_ACCESS_KEY_ID}
+      - key: S3_SECRET_ACCESS_KEY
         scope: RUN_TIME
         type: SECRET
-      - key: GOOGLE_CLIENT_ID
-        scope: RUN_TIME
-        type: SECRET
+        value: ${S3_SECRET_ACCESS_KEY}
       - key: GOOGLE_CLIENT_SECRET
         scope: RUN_TIME
         type: SECRET
-      - key: APPLE_CLIENT_ID
-        scope: RUN_TIME
-        type: SECRET
-      - key: APPLE_CLIENT_SECRET
-        scope: RUN_TIME
-        type: SECRET
-      - key: FACEBOOK_CLIENT_ID
-        scope: RUN_TIME
-        type: SECRET
-      - key: FACEBOOK_CLIENT_SECRET
-        scope: RUN_TIME
-        type: SECRET
-      - key: MICROSOFT_CLIENT_ID
-        scope: RUN_TIME
-        type: SECRET
-      - key: MICROSOFT_CLIENT_SECRET
-        scope: RUN_TIME
-        type: SECRET
-      - key: TWITTER_CLIENT_ID
-        scope: RUN_TIME
-        type: SECRET
-      - key: TWITTER_CLIENT_SECRET
-        scope: RUN_TIME
-        type: SECRET
+        value: ${GOOGLE_CLIENT_SECRET}
 
     alerts:
       - rule: CPU_UTILIZATION
@@ -170,7 +157,7 @@ static_sites:
     envs:
       - key: VITE_API_BASE_URL
         scope: BUILD_TIME
-        value: https://staging.war.tmore.dev/api/v1
+        value: https://staging.war.tmad.dev/api/v1
 
 # Runs before the new revision receives traffic, while the previous one is still
 # serving. A non-zero exit aborts the deployment (spec §10), which is why the

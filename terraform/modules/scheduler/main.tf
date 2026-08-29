@@ -7,6 +7,17 @@
 # The Worker calls the App Platform origin hostname directly, bypassing the WAF
 # rule in modules/edge that blocks /api/v1/internal/* on the public hostname.
 
+# Required in every module that uses it, not just the root — Terraform does
+# not infer a non-default-namespace provider's source for a child module from
+# the root's required_providers alone.
+terraform {
+  required_version = "~> 1.9"
+
+  required_providers {
+    cloudflare = { source = "cloudflare/cloudflare", version = "~> 4.40" }
+  }
+}
+
 variable "env" { type = string }
 variable "account_id" { type = string }
 

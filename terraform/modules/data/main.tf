@@ -6,6 +6,17 @@
 # by a per-instance client pool exhausts a small cluster's connection limit
 # quickly without one.
 
+# Required in every module that uses it, not just the root — Terraform does
+# not infer a non-default-namespace provider's source for a child module from
+# the root's required_providers alone.
+terraform {
+  required_version = "~> 1.9"
+
+  required_providers {
+    digitalocean = { source = "digitalocean/digitalocean", version = "~> 2.43" }
+  }
+}
+
 variable "env" {
   type        = string
   description = "staging | production"
@@ -79,14 +90,20 @@ resource "digitalocean_database_connection_pool" "api" {
 
 # Restrict the cluster to the App Platform app. Passed in rather than derived,
 # because the app is created from platform/{env}.yaml (see modules/compute).
+#
+# Unconditional, not gated behind `count`: both envs always pass a real
+# module.compute.app_id, and on a from-scratch apply that id is "known after
+# apply" (the app is created in the same plan) — a value Terraform cannot use
+# to decide a resource's *count*, even though it's completely fine to use as
+# a plain attribute value (which is all this does). Gating existence on
+# `trusted_app_id == ""` produced "Invalid count argument" on every first
+# apply; do not reintroduce it.
 variable "trusted_app_id" {
   type        = string
   description = "App Platform app id permitted to reach the cluster"
-  default     = ""
 }
 
 resource "digitalocean_database_firewall" "pg" {
-  count      = var.trusted_app_id == "" ? 0 : 1
   cluster_id = digitalocean_database_cluster.pg.id
 
   rule {

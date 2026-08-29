@@ -15,6 +15,17 @@
 # Consequence: after bootstrap, this module's spec block is inert. Change
 # platform/{env}.yaml, not this file.
 
+# Required in every module that uses it, not just the root — Terraform does
+# not infer a non-default-namespace provider's source for a child module from
+# the root's required_providers alone.
+terraform {
+  required_version = "~> 1.9"
+
+  required_providers {
+    digitalocean = { source = "digitalocean/digitalocean", version = "~> 2.43" }
+  }
+}
+
 variable "env" {
   type = string
 }
@@ -26,7 +37,7 @@ variable "region" {
 
 variable "domain" {
   type        = string
-  description = "Public hostname, e.g. staging.war.tmore.dev"
+  description = "Public hostname, e.g. staging.war.tmad.dev"
 }
 
 variable "database_cluster_name" {
