@@ -104,8 +104,11 @@ resource "cloudflare_ruleset" "rewrite" {
 
     action_parameters {
       uri {
+        # regex_replace needs a Business/WAF-Advanced plan; substring() does
+        # the same fixed-prefix strip on Free. "/media" is 6 characters, so
+        # this keeps everything from the slash after it onward.
         path {
-          expression = "regex_replace(http.request.uri.path, \"^/media/\", \"/\")"
+          expression = "substring(http.request.uri.path, 6)"
         }
       }
     }
@@ -167,26 +170,19 @@ resource "cloudflare_ruleset" "firewall" {
 # ── Rate limiting ─────────────────────────────────────────────────────────────
 # Volumetric shedding only. Per-voter limits live in the API, which can decode
 # the JWT the edge cannot (spec §9.4 of war-api-spec.md).
-
+#
+# Free plan permits exactly one rule in the http_ratelimit phase per zone
+# (apply fails outright past that — "exceeded the maximum number of rules").
+# This module originally defined two: vote-submission and auth-endpoint
+# throttles. Auth wins the single slot — credential-stuffing/brute-force
+# volumetric protection has no other backstop, whereas vote submission is
+# already bounded by the API's own per-voter, per-matchup limits (one vote
+# per side, enforced server-side). Revisit if the Cloudflare plan changes.
 resource "cloudflare_ruleset" "ratelimit" {
   zone_id = var.zone_id
   name    = "war-${var.env}-ratelimit"
   kind    = "zone"
   phase   = "http_ratelimit"
-
-  rules {
-    description = "Throttle vote submission per address"
-    expression  = "(http.request.method eq \"POST\" and http.request.uri.path contains \"/matchups/\" and http.request.uri.path contains \"/vote\")"
-    action      = "block"
-    enabled     = true
-
-    ratelimit {
-      characteristics     = ["ip.src", "cf.colo.id"]
-      period              = 60
-      requests_per_period = 300
-      mitigation_timeout  = 60
-    }
-  }
 
   rules {
     description = "Throttle auth endpoints per address"
@@ -233,9 +229,12 @@ resource "cloudflare_ruleset" "cache" {
 
     action_parameters {
       cache = true
+      # `default` is rejected outright alongside respect_origin ("default is
+      # useless in respect_origin mode") - the point of this mode is to defer
+      # to the origin's own Cache-Control (already set to a year, immutable,
+      # for content-addressed variants), not to impose an edge default.
       edge_ttl {
-        mode    = "respect_origin"
-        default = 31536000
+        mode = "respect_origin"
       }
       browser_ttl {
         mode = "respect_origin"
