@@ -58,7 +58,11 @@ services:
   - name: war-api
     instance_size_slug: professional-xs
     instance_count: 2
-    http_port: 8080
+    # war-api's Dockerfile EXPOSEs 3000, and its own default (config.ts's
+    # PORT ?? 3000) matches -- this was 8080 with nothing making the app
+    # actually listen there, so App Platform's health check and all routed
+    # traffic hit a closed port (DeployContainerHealthChecksFailed).
+    http_port: 3000
 
     image:
       registry_type: DOCR
