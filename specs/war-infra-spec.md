@@ -453,6 +453,7 @@ Because every deploy re-renders the spec from the current secret value, **rotati
 | Variable | Used by | Description |
 |---|---|---|
 | `DATABASE_URL` | war-api | PostgreSQL **pooled** connection string (bound from the managed cluster) |
+| `DATABASE_CA_CERT` | war-api | CA cert for the managed cluster's TLS, bound from the platform (`${db.CA_CERT}`) |
 | `JWT_SECRET` | war-api | JWT signing key |
 | `REFRESH_TOKEN_SECRET` | war-api | Refresh token signing key |
 | `INTERNAL_TASK_TOKEN` | war-api, scheduler | Shared secret authenticating scheduled task calls (§12.3) |
@@ -464,7 +465,9 @@ Because every deploy re-renders the spec from the current secret value, **rotati
 | `S3_PUBLIC_BASE_URL` | war-api | Public base URL used to construct image URLs |
 | `VITE_API_BASE_URL` | war-ui-* | API base URL (injected at build time) |
 
-`DATABASE_URL` is bound by the platform from the attached database rather than set manually. Apple, Facebook, Microsoft, and Twitter/X OAuth credentials are deliberately absent from this table — those providers are out of scope for this slice (§13) and nothing consumes them; add rows here when a provider is actually implemented, not before.
+`DATABASE_URL` and `DATABASE_CA_CERT` are bound by the platform from the attached database rather than set manually. Apple, Facebook, Microsoft, and Twitter/X OAuth credentials are deliberately absent from this table — those providers are out of scope for this slice (§13) and nothing consumes them; add rows here when a provider is actually implemented, not before.
+
+**Why `DATABASE_CA_CERT` exists at all.** DO's managed Postgres presents a cert signed by a cluster-specific private CA, which isn't in Node's default trust store — connecting with only `DATABASE_URL` fails outright ("self-signed certificate in certificate chain"). Both the `war-api` service and the `migrate` job in `platform/{env}.yaml` override their `run_command` to write `DATABASE_CA_CERT` to a file and set `NODE_EXTRA_CA_CERTS` before starting the real process, rather than changing how the app or `node-pg-migrate` construct their connections.
 
 **CI/CD credentials** are held as GitHub Actions secrets: a platform API token (deployments, registry login, IaC), object storage access keys (sync + Terraform backend), and an edge API token with zone ID (DNS/rules management and cache purge). Concrete names are in §15.7.
 
