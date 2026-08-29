@@ -76,16 +76,19 @@ resource "digitalocean_database_user" "api" {
 
   # Terraform planned an in-place update to this resource on the second real
   # apply despite neither argument above ever changing - the only other
-  # top-level attribute the provider's schema documents, mysql_auth_plugin,
-  # is MySQL-specific and shouldn't apply to a "pg" cluster, but appears to
-  # be present in the schema regardless and to drift. The attempted update
-  # then failed outright: "PUT .../users/war_api: 400 ... missing the
+  # top-level attributes the provider's schema documents, mysql_auth_plugin
+  # and settings, are MySQL- and Kafka-specific respectively and shouldn't
+  # apply to a "pg" cluster, but the provider records an empty settings {}
+  # block in state regardless and later plans to remove it. Either attempted
+  # update fails outright: "PUT .../users/war_api: 400 ... missing the
   # following required fields: user_settings" - a provider-side request-
   # construction bug for this engine, not something fixable from here.
-  # Ignoring it stops Terraform from ever taking that path for an attribute
-  # that has no meaning for this cluster anyway.
+  # Ignoring both stops Terraform from ever taking that path for attributes
+  # that have no meaning for this cluster anyway. mysql_auth_plugin drifted
+  # first (staging); settings surfaced only later, on production's first
+  # apply - add the next one here too if the provider finds a third.
   lifecycle {
-    ignore_changes = [mysql_auth_plugin]
+    ignore_changes = [mysql_auth_plugin, settings]
   }
 }
 
