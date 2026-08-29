@@ -170,12 +170,14 @@ resource "cloudflare_ruleset" "ratelimit" {
 
     ratelimit {
       characteristics = ["ip.src", "cf.colo.id"]
-      # Free plan only permits a 10s period ("not entitled to use the period
-      # 60, can only use a period among [10]"). Scaled to preserve the same
-      # average rate as the original 60 requests/60s.
+      # Free plan only permits a 10s period and a 10s mitigation timeout
+      # ("not entitled to use the period 60, can only use a period among
+      # [10]", then separately "not entitled to use a mitigation timeout
+      # different from 10"). Rate scaled to preserve the original 60
+      # requests/60s average; mitigation window is just whatever Free allows.
       period              = 10
       requests_per_period = 10
-      mitigation_timeout  = 300
+      mitigation_timeout  = 10
     }
   }
 }

@@ -73,6 +73,20 @@ resource "digitalocean_database_db" "war" {
 resource "digitalocean_database_user" "api" {
   cluster_id = digitalocean_database_cluster.pg.id
   name       = "war_api"
+
+  # Terraform planned an in-place update to this resource on the second real
+  # apply despite neither argument above ever changing - the only other
+  # top-level attribute the provider's schema documents, mysql_auth_plugin,
+  # is MySQL-specific and shouldn't apply to a "pg" cluster, but appears to
+  # be present in the schema regardless and to drift. The attempted update
+  # then failed outright: "PUT .../users/war_api: 400 ... missing the
+  # following required fields: user_settings" - a provider-side request-
+  # construction bug for this engine, not something fixable from here.
+  # Ignoring it stops Terraform from ever taking that path for an attribute
+  # that has no meaning for this cluster anyway.
+  lifecycle {
+    ignore_changes = [mysql_auth_plugin]
+  }
 }
 
 # Transaction-mode pooling. Session-mode would hold a backend connection for the

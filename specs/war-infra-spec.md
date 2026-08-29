@@ -683,6 +683,8 @@ App Platform serves the deployment on a `*.ondigitalocean.app` hostname, which s
 
 **Concurrent deploys.** `war-api` and `war-ui-default` are separate repos deploying components of the *same* app, and GitHub concurrency groups do not span repositories. App Platform queues concurrent deployment requests, so this is safe in practice, but a UI deploy landing mid-API-deploy will briefly deploy a spec the API pipeline is still updating. Acceptable at current cadence; revisit if deploy frequency rises.
 
+**Bootstrap image.** The placeholder `service.image` Terraform creates the app with is a small public Docker Hub image (`nginxdemos/hello`), not a DOCR reference. On a from-scratch environment the registry (`terraform/shared`) has never had anything pushed to it — App Platform validates that a referenced image actually exists at creation time, so a DOCR tag here 404s ("Image tag or digest not found") on every first apply, registry existing or not. Any small, stable public image satisfies that check; it's discarded the moment `platform/{env}.yaml` deploys for real.
+
 ### 15.3 Migrations Hook
 
 The §10 pre-deploy hook is an App Platform `job` with `kind: PRE_DEPLOY`, sharing the API's image.
