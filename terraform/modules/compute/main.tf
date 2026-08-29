@@ -44,11 +44,6 @@ variable "database_cluster_name" {
   type = string
 }
 
-variable "registry_repository" {
-  type    = string
-  default = "war-api"
-}
-
 resource "digitalocean_app" "war" {
   spec {
     name   = "war-${var.env}"
@@ -67,6 +62,15 @@ resource "digitalocean_app" "war" {
     }
 
     # Placeholder only — replaced by platform/{env}.yaml on first deploy.
+    #
+    # A public Docker Hub image, deliberately not DOCR. This resource is what
+    # creates the registry's only consumer; on a from-scratch environment
+    # nothing has ever pushed anything to it yet, so a DOCR reference here
+    # 404s ("Image tag or digest not found") on every first apply — the
+    # registry existing is not the same as it containing this tag. DO
+    # validates only that the referenced image exists, not that it does
+    # anything useful, and this one is discarded the moment platform/{env}.yaml
+    # deploys for real, so any small, stable public image satisfies it.
     service {
       name               = "war-api"
       instance_size_slug = "basic-xxs"
@@ -74,9 +78,9 @@ resource "digitalocean_app" "war" {
       http_port          = 8080
 
       image {
-        registry_type = "DOCR"
-        repository    = var.registry_repository
-        tag           = "bootstrap"
+        registry_type = "DOCKER_HUB"
+        repository    = "nginxdemos/hello"
+        tag           = "latest"
       }
     }
 
