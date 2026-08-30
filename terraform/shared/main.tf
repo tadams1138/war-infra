@@ -182,6 +182,14 @@ resource "cloudflare_ruleset" "cache" {
   # is Worker script settings over Cache Rules. A rule here would silently do
   # nothing for every /media/* request and mislead whoever reads it next into
   # thinking it's what makes media caching work.
+  #
+  # No rule here for the default UI's HTML either, and it needs to stay that
+  # way: Cache Level defaults to not caching HTML at all without an explicit
+  # "Cache Everything" rule, which is what makes App Platform's fixed,
+  # non-configurable s-maxage=86400 on that static site currently inert (see
+  # scripts/smoke-test.sh's ui-default cache-control check). Adding a "cache
+  # everything" rule here for performance later would make that s-maxage
+  # start mattering — revisit the smoke test's tolerance at the same time.
   rules {
     description = "Bypass cache for the API, except where it opts in"
     expression  = "(starts_with(http.request.uri.path, \"/api/v1/\") and not http.request.uri.path contains \"/rankings\")"

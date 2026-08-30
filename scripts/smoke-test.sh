@@ -128,8 +128,26 @@ case "$TARGET" in
     # §6.1 — SPA deep links must return index.html with 200, not 404.
     status "/wars/smoke-test-nonexistent/vote" 200 "SPA deep link returns 200"
 
-    # index.html must never be cached, or deploys will not be picked up (§7).
-    header "/"                cache-control "no-store" "index.html is not cached"
+    # index.html must not go meaningfully stale after a deploy (§7), but
+    # unlike the custom-UI stack below (which we fully control and holds to
+    # a strict no-store), App Platform's static-site hosting has a fixed,
+    # non-configurable Cache-Control — public, max-age=10, s-maxage=86400 —
+    # with no app spec field to override it. s-maxage is currently inert:
+    # Cloudflare's default cache level doesn't cache HTML without an
+    # explicit "Cache Everything" rule, which nothing here adds, and no
+    # other shared cache sits in the path (see terraform/shared/main.tf's
+    # cache ruleset comment — if that ever changes, this check needs
+    # revisiting). What a browser actually bounds by is max-age=10, which
+    # self-heals on the next real navigation — accept no-store or any short
+    # bounded max-age, not literally no-store only.
+    cc_value="$(curl -sSI --max-time "$CURL_TIMEOUT" "${BASE_URL}/" 2>/dev/null \
+                | tr -d '\r' | awk -F': ' 'tolower($1)=="cache-control"{print $2; exit}')"
+    max_age="$(printf '%s' "$cc_value" | grep -oE 'max-age=[0-9]+' | head -1 | cut -d= -f2)"
+    if [[ "$cc_value" == *"no-store"* ]] || { [[ -n "$max_age" ]] && (( max_age <= 60 )); }; then
+      pass "index.html is not meaningfully cached (cache-control: ${cc_value:-<absent>})"
+    else
+      fail "index.html cache-control too permissive — got '${cc_value:-<absent>}'"
+    fi
     ;;
 
   ui)
