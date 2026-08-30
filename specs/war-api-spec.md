@@ -1387,6 +1387,9 @@ nothing partially built.
 - War lifecycle, contestants, contestant schema, matchups, voting, rankings, and the
   internal `close-expired-wars` endpoint (§7.2–§7.5, §7.7): fully implemented as specified.
 - Health check (§7.8): implemented.
+- OpenAPI contract publishing (§7, §11.2): implemented, live in production at
+  `GET /api/v1/openapi.json`. Generated from Fastify's route JSON Schemas via
+  `@fastify/swagger` — never hand-maintained. `/api/v1/internal/*` is excluded, per §7.7.
 
 **Not yet implemented:**
 - Apple, Facebook, Microsoft, and Twitter/X OAuth (§4), and linking multiple providers to
@@ -1396,8 +1399,6 @@ nothing partially built.
   the API's own per-identity limits described here are not
 - Custom UI registry endpoints (§7.6, §10) — the `ui_registrations` table and `wars.ui_slug`
   column exist and are reserved; no endpoint reads or writes them yet
-- OpenAPI contract publishing (§7, §11.2) — `GET /api/v1/openapi.json` does not exist yet;
-  consuming repos cannot generate a typed client from this API until it does
 
 None of the above is inferred to be in scope from the data model's presence — a reserved
 column or table does not mean its feature is built.
