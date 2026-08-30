@@ -893,6 +893,16 @@ The API publishes an OpenAPI 3.1 document at `GET /api/v1/openapi.json`, generat
 
 This document is the **contract between the three repos**. `war-ui-default` generates its typed client from it (`war-ui-default-spec.md` §5) rather than hand-writing request and response types. With three independently deployed repos and no shared package, contract drift is the highest-probability integration failure, and generation is what removes it.
 
+**Requirements on the generated document**, so `war-ui-default`'s `openapi-typescript` step has enough to generate a usable client against this API's real base path and auth scheme:
+
+- `openapi`: `3.1.x`
+- `info.title` and `info.version` are present
+- `servers` contains one entry: the relative reference `/api/v1`, so the same document is valid unchanged across every deployment environment without embedding an environment-specific host
+- `components.securitySchemes.bearerAuth` describes the JWT bearer scheme (`type: http`, `scheme: bearer`, `bearerFormat: JWT`), matching §7's `Authorization: Bearer <jwt>` convention
+- Every path marked 🔒 anywhere in §7.1–§7.6 carries a `security: [{ bearerAuth: [] }]` requirement; every other published path carries none
+- The response's `Content-Type` is `application/json` — per §7's blanket rule for all responses, not `application/vnd.oai.openapi+json`. The plainer type is what `openapi-typescript` and browser tooling expect without content negotiation, and it keeps this endpoint consistent with every other response the API returns
+- The endpoint itself requires no authentication
+
 Endpoints under `/api/v1/internal/*` (§7.7) are excluded from the published document.
 
 ---
