@@ -905,6 +905,289 @@ This document is the **contract between the three repos**. `war-ui-default` gene
 
 Endpoints under `/api/v1/internal/*` (§7.7) are excluded from the published document.
 
+### 11.2.1 Request & Response Body Schemas — Core Voting Loop Slice
+
+§11.2 establishes the document's envelope (`openapi`, `info`, `servers`, `bearerAuth`,
+excluded paths) but stops short of the operations' own `body`/`response` JSON Schemas.
+Nothing required them, and nothing generated them: this repo's routes validate by hand in
+the service layer rather than through Fastify's `schema` option, so `@fastify/swagger` has
+had nothing to generate bodies from. Every operation currently publishes `"200": {
+"description": "Default Response" }` with no `content`, regardless of what status codes or
+shapes the handler actually produces, and `components.schemas` is empty.
+
+This subsection closes that gap for exactly the routes `war-ui-default`'s Core Voting Loop
+slice calls (`war-ui-default-spec.md` §5.1), so its `openapi-typescript` generation step
+produces real request and response types instead of `unknown`. It is **not** a retrofit of
+the rest of the API — every other route keeps its current unschemad, hand-validated body
+handling until its own slice needs otherwise.
+
+Every shape below is transcribed from the shipped handler and the presenter/service
+function it calls, not from prose elsewhere in this document — see "Discrepancies found"
+at the end of this subsection for the two places that prose and code disagree. Add each
+schema as a Fastify `schema: { body, response }` option on exactly the named route.
+**Fastify serializes responses with `fast-json-stringify` against the `response` schema,
+which silently drops any property not listed there** — so a response schema that omits a
+field the presenter actually returns is not merely an incomplete description, it deletes
+that field from the wire response the moment the schema is added. Every field below is
+exhaustive for its shape; do not add a `response` schema for a status this subsection does
+not list without also transcribing that status's actual shape first.
+
+Shapes named here (`MediaItem`, `ResolvedAttribute`, `WarSummary`, `ContestantDetail`) are
+named for cross-reference within this document only. Whether the implementation inlines
+them per route or shares them via `app.addSchema` + `$ref` is an implementation choice;
+either satisfies this subsection as long as the generated document's `paths` entries carry
+the shapes described.
+
+#### Shared shapes
+
+**`MediaItem`** — reflects `src/contestants/mediaPresenter.ts`. Only `kind: "image"` is
+ever produced (§15: `video` media mode is unimplemented), so `kind` is a single-value enum
+here, not the two-branch shape the "Media Representation" prose above describes for the
+full v1 design. Extending this to `video`'s shape is out of scope until that mode ships.
+
+```json
+{
+  "type": "object",
+  "required": ["kind", "id", "display_order", "aspect_ratio", "variants"],
+  "properties": {
+    "kind": { "type": "string", "enum": ["image"] },
+    "id": { "type": "string", "format": "uuid" },
+    "display_order": { "type": "integer" },
+    "aspect_ratio": { "type": ["number", "null"] },
+    "variants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["width", "url"],
+        "properties": {
+          "width": { "type": "integer" },
+          "url": { "type": "string" }
+        }
+      }
+    }
+  }
+}
+```
+
+**`ResolvedAttribute`** — reflects `src/contestants/schemaValidation.ts`'s
+`resolveAttributes`. `value`'s runtime type is always `string` or `number`: schema types
+`string`/`text`/`url`/`date` all validate as JS strings, `number` as a JS number.
+
+```json
+{
+  "type": "object",
+  "required": ["key", "label", "type", "value"],
+  "properties": {
+    "key": { "type": "string" },
+    "label": { "type": "string" },
+    "type": { "type": "string", "enum": ["string", "number", "text", "url", "date"] },
+    "value": { "type": ["string", "number"] }
+  }
+}
+```
+
+**`WarSummary`** — reflects `src/wars/warPresenter.ts`'s `presentWarSummary`.
+
+```json
+{
+  "type": "object",
+  "required": ["id", "title", "category", "status", "visibility", "media_mode", "contestant_schema", "ends_at"],
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "title": { "type": "string" },
+    "category": { "type": ["string", "null"] },
+    "status": { "type": "string", "enum": ["draft", "active", "closed"] },
+    "visibility": { "type": "string", "enum": ["public", "invite_only"] },
+    "media_mode": { "type": "string", "enum": ["image"] },
+    "contestant_schema": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["key", "label", "type"],
+        "properties": {
+          "key": { "type": "string" },
+          "label": { "type": "string" },
+          "type": { "type": "string", "enum": ["string", "number", "text", "url", "date"] }
+        }
+      }
+    },
+    "ends_at": { "type": ["string", "null"], "format": "date-time" }
+  }
+}
+```
+
+**`ContestantDetail`** — reflects `src/contestants/contestantPresenter.ts`'s `presentContestant`.
+
+```json
+{
+  "type": "object",
+  "required": ["id", "name", "bio", "attributes", "media", "win_count", "appearance_count"],
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "name": { "type": "string" },
+    "bio": { "type": ["string", "null"] },
+    "attributes": { "type": "array", "items": { "$ref": "ResolvedAttribute" } },
+    "media": { "type": "array", "items": { "$ref": "MediaItem" } },
+    "win_count": { "type": "integer" },
+    "appearance_count": { "type": "integer" }
+  }
+}
+```
+
+#### `POST /auth/refresh`
+
+Reflects `src/auth/routes.ts`. `200`/`401`/`403` are all produced by this handler directly
+(not the shared `requireAuth` preHandler, which this route does not use).
+
+- `response.200`: `{ "type": "object", "required": ["token"], "properties": { "token": { "type": "string" } } }`
+- `response.401`: `{ "type": "object", "required": ["error"], "properties": { "error": { "type": "string" } } }`
+- `response.403`: same shape as `401`
+
+#### `DELETE /auth/session`
+
+Reflects `src/auth/routes.ts`. Always `204` on success (the route has no other outcome of
+its own); a missing/invalid bearer token is rejected `401` by the shared `requireAuth`
+preHandler before the handler runs.
+
+- `response.204`: no body. Declare it with an empty schema (or omit `content` explicitly,
+  however the implementation's Fastify/swagger version expresses "no body for this status")
+  so the document shows `204` rather than falling back to the current blanket `200`.
+
+#### `GET /auth/me`
+
+Reflects `src/auth/routes.ts` and `src/auth/votersRepository.ts`'s `Voter`.
+
+- `response.200`:
+  ```json
+  {
+    "type": "object",
+    "required": ["voter"],
+    "properties": {
+      "voter": {
+        "type": "object",
+        "required": ["id", "display_name", "avatar_url"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "display_name": { "type": ["string", "null"] },
+          "avatar_url": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+  ```
+
+#### `GET /wars`
+
+Reflects `src/wars/routes.ts` and `WarSummary` above. No `next_cursor` (or any pagination
+metadata) is returned — the client derives the next page's `cursor` query param from the
+last item's `id`, since `listWars` filters on `id <`.
+
+- `response.200`: `{ "type": "object", "required": ["wars"], "properties": { "wars": { "type": "array", "items": { "$ref": "WarSummary" } } } }`
+
+#### `GET /wars/:id`
+
+Reflects `src/wars/routes.ts`'s `getWar` outcome and `presentWarDetail` (`WarSummary` + `contestants`).
+
+- `response.200`: `WarSummary`'s properties/required, plus `contestants` (required):
+  `{ "type": "array", "items": { "$ref": "ContestantDetail" } }`
+- `response.404`: `{ "type": "object", "required": ["error"], "properties": { "error": { "type": "string" } } }`
+
+#### `POST /wars/:id/join`
+
+Reflects `src/wars/routes.ts` and `joinWar`'s outcome, mapped by `replyForOutcome`.
+
+- `response.204`: no body (the `'ok'` outcome; `value` is `void`)
+- `response.403`: `{ "type": "object", "required": ["error"], "properties": { "error": { "type": "string" } } }`
+  (`notActive` → `"War is not active"`)
+- `response.404`: same shape as `403` (`notFound` → `"not found"`)
+
+#### `GET /wars/:id/matchups/next`
+
+Reflects `src/matchups/matchupsService.ts`'s `NextMatchupView`. `prefetch` is present only
+when a following unvoted pair exists — omit it from `required`.
+
+- `response.200`:
+  ```json
+  {
+    "type": "object",
+    "required": ["matchup", "progress"],
+    "properties": {
+      "matchup": {
+        "type": "object",
+        "required": ["id", "left", "right"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "left": {
+            "type": "object",
+            "required": ["id", "name", "media"],
+            "properties": {
+              "id": { "type": "string", "format": "uuid" },
+              "name": { "type": "string" },
+              "media": { "type": "array", "items": { "$ref": "MediaItem" } }
+            }
+          },
+          "right": { "$ref": "#/properties/matchup/properties/left" }
+        }
+      },
+      "progress": {
+        "type": "object",
+        "required": ["voted", "total"],
+        "properties": {
+          "voted": { "type": "integer" },
+          "total": { "type": "integer" }
+        }
+      },
+      "prefetch": {
+        "type": "object",
+        "required": ["matchup_id", "media"],
+        "properties": {
+          "matchup_id": { "type": "string", "format": "uuid" },
+          "media": { "type": "array", "items": { "$ref": "MediaItem" } }
+        }
+      }
+    }
+  }
+  ```
+  (Write `right` as its own copy of `left`'s schema rather than an internal `$ref` if the
+  implementation's schema tooling does not resolve intra-document pointers the way the
+  sketch above assumes — the two must simply describe the same shape.)
+- `response.204`: no body (every pair voted)
+
+#### `POST /wars/:id/matchups/:mId/vote`
+
+Reflects `src/matchups/routes.ts` and `castVoteForVoter`'s `CastVoteOutcome`. The
+`default: reply.code(500)…` branch is unreachable given the outcome union above it and is
+not part of this schema.
+
+- `body`: `{ "type": "object", "required": ["winner_id"], "properties": { "winner_id": { "type": "string", "format": "uuid" } } }`
+- `response.201`: `{ "type": "object", "required": ["vote_id"], "properties": { "vote_id": { "type": "string", "format": "uuid" } } }` (`'created'`)
+- `response.200`: `{ "type": "object", "required": ["status"], "properties": { "status": { "type": "string", "enum": ["already recorded"] } } }` (`'retried'`)
+- `response.409`: `{ "type": "object", "required": ["error"], "properties": { "error": { "type": "string" } } }` (`'conflict'`)
+- `response.422`: same shape as `409` (`'invalidWinner'`)
+- `response.403`: same shape as `409` (`'warNotActive'` or `'notJoined'` — same shape, two different messages)
+- `response.404`: same shape as `409` (`'notFound'`)
+
+#### Discrepancies found (code trusted over prose; flagged here per this addendum's mandate)
+
+1. **`GET /auth/{provider}/callback`'s existing `200` example (§7.1) does not match the
+   shipped handler.** §7.1 currently shows a `200` response body of
+   `{ "token", "refresh_token", "voter" }`, but `src/auth/routes.ts` performs a `302`
+   redirect on success with **no response body at all** — the refresh token travels only as
+   an `HttpOnly` cookie, exactly as §4.1 (which is accurate) describes. §7.1's `200` example
+   predates §4.1's cookie-based flow and should be read as superseded by it; this addendum
+   does not add a `200` body schema for the callback route because the code returns none.
+   The stale example in §7.1 itself is left untouched here (out of this addendum's stated
+   scope of "routes' body/response schemas") rather than silently rewritten — a spec author
+   revising §7.1 directly should reconcile it with §4.1.
+2. **`GET /auth/{provider}/callback` is not redirect-only.** Its two `400` failure paths
+   (`{ "error": "missing code" }` when the query string omits `code`; `{ "error": "state
+   mismatch" }` when the `oauth_state` cookie is absent or does not match) each send a real
+   JSON body — contradicting this addendum's originating assumption that this route has "no
+   response body to schema." Both share the shape
+   `{ "type": "object", "required": ["error"], "properties": { "error": { "type": "string" } } }`
+   for `response.400`. `GET /auth/{provider}/login`, by contrast, is confirmed
+   redirect-or-empty-404 only — no body to schema on that route.
+
 ---
 
 ## 12. CI/CD
