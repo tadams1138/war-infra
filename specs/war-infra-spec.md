@@ -322,7 +322,8 @@ Caching is layered: the edge in front of everything, and the platform's and stor
 | Asset class | `Cache-Control` | Set by |
 |---|---|---|
 | Hashed JS/CSS/assets | `public, max-age=31536000, immutable` | Build output + upload metadata |
-| `index.html` (any UI) | `no-store` | Upload metadata / edge function |
+| `index.html` (custom UIs) | `no-store` | Upload metadata / edge function |
+| `index.html` (default UI) | `public, max-age=10, s-maxage=86400` — fixed by App Platform, no override exists; see below | App Platform static component |
 | `/runtime/v{n}.js` | `public, max-age=600, stale-while-revalidate=86400` | Platform static component |
 | Contestant images | `public, max-age=31536000, immutable` | API on upload (§11) |
 | API responses | Per-endpoint; default `no-store` | `war-api` |
@@ -332,6 +333,8 @@ Caching is layered: the edge in front of everything, and the platform's and stor
 - Content-hashed filenames come from the Vite build, so asset URLs change on every deploy and never require invalidation
 - Only `index.html` is purged on deploy, by explicit URL
 - Edge cache rules bypass the cache entirely for `/api/v1/*` unless an endpoint sets its own `Cache-Control`
+
+**Why the default UI's `index.html` doesn't need the same `no-store` the custom-UI stack guarantees.** `no-store` matters because deploys **delete** the previous build's hashed assets — a client holding a stale `index.html` would reference files that no longer exist. The custom-UI Spaces+Worker stack is fully self-controlled, so it costs nothing to guarantee `no-store` exactly there. App Platform's static-site hosting has no such override (confirmed against DO's own docs and open community feature requests asking for one) — its `s-maxage=86400` is, right now, inert: Cloudflare's default cache level doesn't cache HTML at all without an explicit "Cache Everything" rule, and none exists for these routes (`terraform/shared/main.tf`'s cache ruleset deliberately has none, with a comment explaining why). What a browser actually bounds by is `max-age=10`, short enough to self-heal on the next real navigation. `scripts/smoke-test.sh`'s `ui-default` check accepts `no-store` or any `max-age` ≤ 60s for exactly this reason — revisit both it and the ruleset comment together if a "Cache Everything" rule is ever added for these routes, since that would make `s-maxage` start mattering.
 
 ---
 
