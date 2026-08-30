@@ -1166,6 +1166,31 @@ not part of this schema.
 - `response.422`: same shape as `409` (`'invalidWinner'`)
 - `response.403`: same shape as `409` (`'warNotActive'` or `'notJoined'` — same shape, two different messages)
 - `response.404`: same shape as `409` (`'notFound'`)
+- `response.400`: a malformed body (missing `winner_id`, wrong type, or a value that fails
+  the `uuid` format check) never reaches `castVoteForVoter` — Fastify's `ajv` validator
+  rejects it against the `body` schema above before the handler runs, and Fastify's own
+  error handler replies before this route's code executes at all. The shape is **not**
+  this API's `{ "error": "..." }` envelope used elsewhere on this route; it is Fastify's
+  own validation-error envelope, produced by ajv/`fast-json-stringify`, and its property
+  names differ on purpose — do not "fix" it to match the other 4xx responses above, and do
+  not add an `error` property to it. Verified against Fastify 5.11.0:
+  ```json
+  { "statusCode": 400, "code": "FST_ERR_VALIDATION", "error": "Bad Request", "message": "body/winner_id must match format \"uuid\"" }
+  ```
+  `message`'s exact text varies with which rule fails (missing field vs. wrong format vs.
+  wrong type); the envelope shape does not.
+  ```json
+  {
+    "type": "object",
+    "required": ["statusCode", "code", "error", "message"],
+    "properties": {
+      "statusCode": { "type": "integer" },
+      "code": { "type": "string" },
+      "error": { "type": "string" },
+      "message": { "type": "string" }
+    }
+  }
+  ```
 
 #### Discrepancies found (code trusted over prose; flagged here per this addendum's mandate)
 
