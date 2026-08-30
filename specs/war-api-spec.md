@@ -22,6 +22,7 @@
 12. [CI/CD](#12-cicd)
 13. [Out of Scope (v1)](#13-out-of-scope-v1)
 14. [Gherkin Acceptance Tests](#14-gherkin-acceptance-tests)
+15. [Implementation Status](#15-implementation-status)
 
 ---
 
@@ -796,7 +797,7 @@ Registration of new slugs is an administrative operation (no public endpoint in 
 |---|---|
 | Component | Choice | Why this one |
 |---|---|---|
-| Runtime | Node.js 22 (TypeScript) | |
+| Runtime | Node.js 24.x (TypeScript) | See §15 — the spec originally named 22, but the build machine's `winget` LTS channel resolved 24.x, which is what's actually deployed |
 | Framework | **Fastify** | JSON Schema validation on every route, and §7's OpenAPI document generates from those same schemas — one definition, not three |
 | Database | PostgreSQL | |
 | Query builder | **Kysely** | §12 mandates hand-written SQL migrations with a `schema_migrations` table. Prisma Migrate wants to own the schema and would fight that; Kysely types queries without owning migrations |
@@ -1355,3 +1356,53 @@ Feature: Rankings
     When an unauthenticated user GETs rankings
     Then the response status is 401
 ```
+
+---
+
+## 15. Implementation Status
+
+This document specifies the full v1 design across all planned OAuth providers, both media
+modes, rate limiting, and the custom UI registry. As of 2026-08-29, only a single vertical
+slice has actually been built and deployed — the **Core Voting Loop**: sign in, create a
+War, add contestants with images, activate, vote, and read rankings, end to end, with
+nothing partially built.
+
+**Implemented:**
+- Auth (§4): Google only. The route shape (`/auth/{provider}/...`) already supports the
+  other four providers listed in §4 without restructuring; any `{provider}` other than
+  `google` currently returns `404`.
+- Media (§5, §11.1): `image` mode only. A request specifying `media_mode: "video"` is
+  rejected with `422`. The `video` columns in `contestant_media` (§6) and the video
+  endpoints (§7.3, §11.3) exist in this document but are not implemented.
+- War lifecycle, contestants, contestant schema, matchups, voting, rankings, and the
+  internal `close-expired-wars` endpoint (§7.2–§7.5, §7.7): fully implemented as specified.
+- Health check (§7.8): implemented.
+
+**Not yet implemented:**
+- Apple, Facebook, Microsoft, and Twitter/X OAuth (§4), and linking multiple providers to
+  one voter account
+- `video` media mode (§5, §6, §11.3)
+- Rate limiting (§9.4) — the edge's volumetric limits (`war-infra-spec.md` §13.1) are live;
+  the API's own per-identity limits described here are not
+- Custom UI registry endpoints (§7.6, §10) — the `ui_registrations` table and `wars.ui_slug`
+  column exist and are reserved; no endpoint reads or writes them yet
+- OpenAPI contract publishing (§7, §11.2) — `GET /api/v1/openapi.json` does not exist yet;
+  consuming repos cannot generate a typed client from this API until it does
+
+None of the above is inferred to be in scope from the data model's presence — a reserved
+column or table does not mean its feature is built.
+
+**§14's Gherkin covers the full design**, including scenarios for behavior not yet
+built (video-mode scenarios under "Media Mode", all of "Rate Limiting"). The scenarios
+that actually execute in CI live in `war-api/specs/features/*.feature` — a repo-local,
+implemented-only adaptation of a subset of §14, bound via `@amiceli/vitest-cucumber`. That
+directory is executable test fixture, not a second copy of this document; it does not
+duplicate the prose here and should not be read as such.
+
+**Toolchain deviation.** §11 names Node.js 22 in its table, now corrected to 24.x. At the
+time the Core Voting Loop slice was built, Node.js 22 was no longer on `winget`'s LTS
+channel; `winget install OpenJS.NodeJS.LTS` resolved to Node.js 24.18.1. The
+actually-deployed runtime is **Node.js 24.x**.
+
+This section is the status marker for what has shipped. Update it — not by forking a
+second prose document in `war-api` — as further slices land.
