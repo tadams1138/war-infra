@@ -19,6 +19,7 @@
 9. [Tech Stack](#9-tech-stack)
 10. [CI/CD](#10-cicd)
 11. [Gherkin Acceptance Tests](#11-gherkin-acceptance-tests)
+12. [Implementation Status](#12-implementation-status)
 
 ---
 
@@ -485,3 +486,59 @@ Feature: Create War
     Then an error message is shown
     And the War is not activated
 ```
+
+---
+
+## 12. Implementation Status
+
+This document specifies the full default UI across all seven routes, both media modes, and
+the shared runtime artifact for custom UIs. As of 2026-08-29, `war-ui-default`'s deployed
+application is still the placeholder "coming soon" page described in its README — no route
+has shipped yet. This section marks the boundary the first vertical slice draws: what that
+slice covers, versus what remains spec-only until a later slice picks it up.
+
+**In this slice — the Core Voting Loop:**
+
+- Home (`/`) (§4): browse active public Wars. War cards show title, category, and
+  contestant count only — not the status badge or time-remaining fields WarCard (§6) also
+  describes; those wait for the slice that actually needs them.
+- Login (`/login`) and the auth flow (§7): OAuth provider selection, JWT held in memory
+  only, refresh-cookie exchange at `/auth/callback`, single-flight refresh on `401`, and a
+  terminal failed-refresh path that clears the JWT and redirects to `/login`. Provider
+  buttons render for the full list in `war-api-spec.md` §4, but only Google is live on the
+  API side (`war-api-spec.md` §15) — the other four 404 until the API adds them.
+- WarDetail (`/wars/:id`) (§4): War overview and contestant gallery, image mode only, plus
+  ContestantAttributes (§6) rendering the resolved schema.
+- VoteMode (`/wars/:id/vote`) (§4, §6): MatchupView, ContestantCard, ImageCarousel, and
+  ProgressBar — **image mode only**; video mode is spec-only in this slice (§6, "MatchupView
+  — video mode"). Navigating here silently joins the War on first entry (`joinWar`, §5.2)
+  rather than exposing a separate Join control — the "403 Not joined" row in §8 is a
+  defensive fallback for that join call racing or failing, not the normal path.
+- `api/client.ts` (§5): typed wrapper covering exactly the endpoints this slice calls — wars
+  list, war detail, next-matchup, cast-vote, join, and the auth endpoints. Types are meant to
+  generate from war-api's OpenAPI document (§5.1), but that document doesn't exist yet:
+  `war-api-spec.md` §15 lists `GET /api/v1/openapi.json` as not yet implemented. This slice
+  cannot complete §5.1's generation step against a live contract until war-api publishes it.
+
+**Deferred — spec-only, no scope in this slice:**
+
+- Rankings (`/wars/:id/rankings`) and RankingsTable (§4, §6)
+- CreateWar wizard (`/wars/new`) (§4, §6)
+- MyWars (`/my-wars`) (§4)
+- Video-mode matchups — MatchupView's video playback sequence (§6)
+- The shared runtime build artifact for custom UIs, `dist/runtime/v1.js` and `dist/runtime/v1.d.ts` (§5.2)
+
+None of the above is inferred to be in scope from a component or route already being named
+in this document — a section describing the full design does not mean every part of it has
+been built.
+
+**§11's Gherkin covers the full design**, including scenarios for pages and modes not yet
+built (Rankings, Create War, and the video-mode scenarios under "Video Matchups"). The
+scenarios that actually apply to this slice live in `war-ui-default/features/*.feature` — a
+repo-local, in-scope-only adaptation of a subset of §11, which the implementer binds into
+Playwright specs under `tests/acceptance/`. That directory is executable test fixture, not a
+second copy of this document; it does not duplicate the prose here and should not be read as
+such.
+
+This section is the status marker for what this slice covers. Update it — not by forking a
+second prose document in `war-ui-default` — as further slices land.
