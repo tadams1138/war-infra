@@ -1051,11 +1051,9 @@ The secrets, variables, Terraform modules, and CI/CD pipelines across all three 
 
 **For the next environment or component added to this project**: get one real deploy fully working end-to-end — even a trivial one — before building out the surrounding automation around it. A green CI pipeline that has never actually deployed anything proves much less than it looks like it proves.
 
-### 20.2 `war-ui-default` has no real application yet
+### 20.2 `war-ui-default` had no real application at first deploy — resolved
 
-As of this writing, `war-ui-default`'s deployed app is a placeholder (`src/main.ts` — a single "War / Coming soon." page), not the real SPA. It exists only so App Platform's `static_sites` build step succeeds — without it, `war-api`'s deploy couldn't go live either, since the API and UI are components of one App Platform app deployed atomically (§5.2). Both staging and production are currently serving this placeholder.
-
-Replace it with the real SPA under `war-ui-default`'s own TDD process (see its `CLAUDE.md`) whenever that work starts. Nothing in the placeholder is meant to survive that — see the "Status: placeholder" section of `war-ui-default/README.md`.
+At first deploy, `war-ui-default`'s deployed app was a placeholder (`src/main.ts` — a single "War / Coming soon." page), existing only so App Platform's `static_sites` build step would succeed (the API and UI are components of one App Platform app deployed atomically, §5.2). **This is no longer current** — see §20.5: the placeholder was replaced by the real Core Voting Loop implementation, live in both staging and production as of 2026-08-31.
 
 ### 20.3 `war-api`'s `master` branch had a 10-year-old, unrelated history
 
@@ -1073,3 +1071,14 @@ gh variable set DO_APP_ID -R tadams1138/war-ui-default -e <staging|production> -
 ```
 
 This is easy to forget precisely because it's a one-time step per environment, done long after the routine of "push code, pipeline deploys it" is established — the failure mode when it's missing (`PUT https://api.digitalocean.com/v2/apps/: 405`, an empty app ID in the URL) doesn't obviously point at a missing GitHub variable. Needed again for any *new* environment this project ever adds beyond staging/production.
+
+### 20.5 Core Voting Loop slice shipped (2026-08-31) — and the Google OAuth deployment-config bug family
+
+The first real vertical slice — Home, Login/auth, WarDetail, VoteMode (image mode only), `api/client.ts`, plus `war-api`'s `openapi.json` contract, `contestant_count`, and a typed vote-403 discriminator — is live in both staging and production for both `war-api` and `war-ui-default`, verified with a real interactive Google login, not just automated tests. `war-ui-default`'s Implementation Status (its own spec, §12) and `war-api-spec.md` §15 both reflect current scope; check those before assuming what's built versus still spec-only.
+
+**The Google OAuth login was broken on every real deployment for four consecutive rounds after the slice otherwise worked**, each caught only by an actual human trying to log in, not by the (green, passing) automated suite. The generic, reusable lessons from all four rounds — redirect-URI single-sourcing, `openid-client` v6's `iss`/RFC 9207 requirement, the OAuth `error` query parameter, error-boundary scoping — are written up in this Claude installation's global `google-oauth` skill, not repeated here. What's specific to *this* project:
+
+- **This architecture serves the API and the default UI from one shared domain per environment** (`staging.war.tmad.dev`, `war.tmad.dev` — §3, §5). `PUBLIC_BASE_URL` (war-api's own base URL), `UI_ORIGINS` (CORS + the OAuth callback's post-login redirect target), and the derived Google OAuth `redirect_uri` are consequently all the *same* domain value in this project specifically — a project without this shared-domain design would need to treat them as genuinely independent per-environment values.
+- Four PRs, in order, on `war-api`: **#10** (redirect URI never deployed, silently defaulted to `localhost:3000`), **#11** (the `iss`/RFC 9207 fix, plus closing a second redirect-URI divergence the first fix's initial pass reintroduced), **#12** (`UI_ORIGINS` — found by auditing every other `localhost`-defaulting config field immediately after #10, rather than waiting for a third user report), **#13** (the callback's failure-response contract — 403/400/502 instead of a leaked library error code). Each went through the project's full spec → implement → review → apply cycle; each review caught at least one real, live-bug-shaped gap the implementation had missed.
+- `assertProductionConfig` in `war-api/src/config.ts` is the concrete result of this: every deployment-required, non-secret config value (`apiBaseUrl`, `uiOrigins`) now has a fail-fast boot check, added reactively one bug at a time — the `google-oauth` skill's "meta-lesson" section is the standing instruction to do this audit proactively for the *next* project, not reactively.
+- **Deferred, not forgotten**: the OAuth callback's failure responses are still raw JSON shown mid-redirect-chain in a real browser (functionally correct, UX-rough) — a redirect-based failure UX (e.g. `/login?error=...`) was explicitly scoped out of PR #13 as a larger, cross-repo change needing `war-ui-default` to have somewhere to send the user. Pick this up before or alongside whatever `war-ui-default` slice next touches the Login page.

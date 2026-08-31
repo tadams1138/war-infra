@@ -1779,15 +1779,20 @@ Feature: Rankings
 ## 15. Implementation Status
 
 This document specifies the full v1 design across all planned OAuth providers, both media
-modes, rate limiting, and the custom UI registry. As of 2026-08-29, only a single vertical
-slice has actually been built and deployed — the **Core Voting Loop**: sign in, create a
+modes, rate limiting, and the custom UI registry. As of 2026-08-31, a single vertical
+slice has been built and deployed — the **Core Voting Loop**: sign in, create a
 War, add contestants with images, activate, vote, and read rankings, end to end, with
-nothing partially built.
+nothing partially built — and it is now consumed for real by `war-ui-default`'s own
+Core Voting Loop slice, live in both staging and production for both repos
+(`war-ui-default-spec.md` §12).
 
 **Implemented:**
 - Auth (§4): Google only. The route shape (`/auth/{provider}/...`) already supports the
   other four providers listed in §4 without restructuring; any `{provider}` other than
-  `google` currently returns `404`.
+  `google` currently returns `404`. The callback's failure responses (§4.1, "Callback
+  failure responses") are fully implemented: the OAuth `error` parameter → `403`, missing
+  `code`/state mismatch → `400`, an exchange failure → `502` — no client, human or
+  automated, sees a raw upstream library error code.
 - Media (§5, §11.1): `image` mode only. A request specifying `media_mode: "video"` is
   rejected with `422`. The `video` columns in `contestant_media` (§6) and the video
   endpoints (§7.3, §11.3) exist in this document but are not implemented.
@@ -1797,6 +1802,9 @@ nothing partially built.
 - OpenAPI contract publishing (§7, §11.2): implemented, live in production at
   `GET /api/v1/openapi.json`. Generated from Fastify's route JSON Schemas via
   `@fastify/swagger` — never hand-maintained. `/api/v1/internal/*` is excluded, per §7.7.
+  Request/response body schemas for the Core Voting Loop slice's routes (§11.2.1) are
+  implemented, including `contestant_count` on `WarSummary` and the vote endpoint's `403`
+  `reason` discriminator (§11.2.1, "Addendum (2026-08-30)").
 
 **Not yet implemented:**
 - Apple, Facebook, Microsoft, and Twitter/X OAuth (§4), and linking multiple providers to
@@ -1806,8 +1814,6 @@ nothing partially built.
   the API's own per-identity limits described here are not
 - Custom UI registry endpoints (§7.6, §10) — the `ui_registrations` table and `wars.ui_slug`
   column exist and are reserved; no endpoint reads or writes them yet
-- `contestant_count` on `WarSummary`, and the vote endpoint's `403` `reason` discriminator
-  (§11.2.1, "Addendum (2026-08-30)") — specified, not yet implemented
 
 None of the above is inferred to be in scope from the data model's presence — a reserved
 column or table does not mean its feature is built.
