@@ -986,12 +986,14 @@ full v1 design. Extending this to `video`'s shape is out of scope until that mod
 }
 ```
 
-**`WarSummary`** — reflects `src/wars/warPresenter.ts`'s `presentWarSummary`.
+**`WarSummary`** — reflects `src/wars/warPresenter.ts`'s `presentWarSummary`, plus
+`contestant_count` (not yet in the shipped presenter as of this addendum — see "Addendum
+(2026-08-30)" below).
 
 ```json
 {
   "type": "object",
-  "required": ["id", "title", "category", "status", "visibility", "media_mode", "contestant_schema", "ends_at"],
+  "required": ["id", "title", "category", "status", "visibility", "media_mode", "contestant_schema", "ends_at", "contestant_count"],
   "properties": {
     "id": { "type": "string", "format": "uuid" },
     "title": { "type": "string" },
@@ -1011,7 +1013,8 @@ full v1 design. Extending this to `video`'s shape is out of scope until that mod
         }
       }
     },
-    "ends_at": { "type": ["string", "null"], "format": "date-time" }
+    "ends_at": { "type": ["string", "null"], "format": "date-time" },
+    "contestant_count": { "type": "integer", "minimum": 0 }
   }
 }
 ```
@@ -1084,6 +1087,10 @@ last item's `id`, since `listWars` filters on `id <`.
 
 - `response.200`: `{ "type": "object", "required": ["wars"], "properties": { "wars": { "type": "array", "items": { "$ref": "WarSummary" } } } }`
 
+Each item's `contestant_count` is the number of `contestants` rows for that War
+(`contestants.war_id = wars.id`), regardless of the War's `status` — a `draft` War with 2
+contestants reports `2`, not `0` (see "Addendum (2026-08-30)" below).
+
 #### `GET /wars/:id`
 
 Reflects `src/wars/routes.ts`'s `getWar` outcome and `presentWarDetail` (`WarSummary` + `contestants`).
@@ -1091,6 +1098,10 @@ Reflects `src/wars/routes.ts`'s `getWar` outcome and `presentWarDetail` (`WarSum
 - `response.200`: `WarSummary`'s properties/required, plus `contestants` (required):
   `{ "type": "array", "items": { "$ref": "ContestantDetail" } }`
 - `response.404`: `{ "type": "object", "required": ["error"], "properties": { "error": { "type": "string" } } }`
+
+`contestant_count` (inherited from `WarSummary`) must equal `contestants.length` in this
+response — both are derived from the same rows and must never disagree (see "Addendum
+(2026-08-30)" below for why the detail response carries both rather than only the array).
 
 #### `POST /wars/:id/join`
 
@@ -1164,7 +1175,21 @@ not part of this schema.
 - `response.200`: `{ "type": "object", "required": ["status"], "properties": { "status": { "type": "string", "enum": ["already recorded"] } } }` (`'retried'`)
 - `response.409`: `{ "type": "object", "required": ["error"], "properties": { "error": { "type": "string" } } }` (`'conflict'`)
 - `response.422`: same shape as `409` (`'invalidWinner'`)
-- `response.403`: same shape as `409` (`'warNotActive'` or `'notJoined'` — same shape, two different messages)
+- `response.403`: **not** the same shape as `409` — carries a `reason` discriminator
+  alongside `error` (see "Addendum (2026-08-30)" below; not yet in the shipped handler as of
+  this addendum):
+  ```json
+  {
+    "type": "object",
+    "required": ["error", "reason"],
+    "properties": {
+      "error": { "type": "string" },
+      "reason": { "type": "string", "enum": ["war_not_active", "not_joined"] }
+    }
+  }
+  ```
+  `'warNotActive'` → `{ "error": "War is not active", "reason": "war_not_active" }`;
+  `'notJoined'` → `{ "error": "voter has not joined this War", "reason": "not_joined" }`.
 - `response.404`: same shape as `409` (`'notFound'`)
 - `response.400`: a malformed body (missing `winner_id`, wrong type, or a value that fails
   the `uuid` format check) never reaches `castVoteForVoter` — Fastify's `ajv` validator
@@ -1212,6 +1237,60 @@ not part of this schema.
    `{ "type": "object", "required": ["error"], "properties": { "error": { "type": "string" } } }`
    for `response.400`. `GET /auth/{provider}/login`, by contrast, is confirmed
    redirect-or-empty-404 only — no body to schema on that route.
+
+#### Addendum (2026-08-30): `contestant_count` on `WarSummary`, and a `reason` discriminator on the vote endpoint's `403`
+
+Two gaps surfaced while `war-ui-default` implemented its Core Voting Loop slice against this
+contract. **Unlike the rest of §11.2.1, neither shape below is transcribed from shipped
+code** — both are new requirements for `war-api`'s next implementation slice to build
+against. §15 tracks both as pending until they ship.
+
+**1. `GET /wars` list items carry no contestant count.** `war-ui-default-spec.md`'s WarCard
+component (Home page browse list) needs each War's contestant count alongside its title and
+category, but `presentWarSummary` never computes one — only `GET /wars/:id`'s
+`presentWarDetail` does, indirectly, by fetching the full `contestants` array.
+
+`contestant_count` is added to the shared `WarSummary` shape (above) rather than to a
+bespoke list-only shape, because `WarDetailView` is literally `WarSummaryView` plus
+`contestants` (`src/wars/warPresenter.ts`) — one presenter function, `presentWarSummary`,
+already backs both `GET /wars` and, by composition, `GET /wars/:id`. Giving `WarSummary`
+itself the field means both endpoints gain it from a single change, and any client typed
+against `WarSummary` sees the same shape regardless of which route produced it — no
+detail-only special case where the count must be read from `contestants.length` instead of
+the field every other `WarSummary` consumer uses. The alternative (add the field only to the
+list shape; let the detail response rely on `contestants.length`) was rejected for exactly
+that inconsistency: the two responses share one presenter today, and diverging their shapes
+here would be the first crack in that. The cost is one redundant integer on the detail
+response — `contestant_count` and `contestants.length` must always agree there (stated as a
+requirement in `GET /wars/:id` above); disagreement is a defect, not something for a client
+to reconcile.
+
+`contestant_count` counts `contestants` rows for the War (`contestants.war_id = wars.id`),
+regardless of the War's `status` — a `draft` War with 2 contestants reports `2`, not `0`.
+Whether it's produced by a join, a correlated subquery, or a batched follow-up query keyed
+by the page's War ids is an implementation choice this addendum does not constrain.
+
+**2. The vote endpoint's `403` does not distinguish its two causes.**
+`POST /wars/:id/matchups/:mId/vote`'s `castVoteForVoter` (`src/votes/votesService.ts`)
+returns two distinct `403`-producing outcomes — `'warNotActive'` and `'notJoined'` — and
+`src/matchups/routes.ts` maps both to `403 { "error": string }`, distinguished only by
+message text. A client that must branch on which case occurred (e.g. "War ended, return to
+browse" vs. "you haven't joined — join now") has nothing but that string to match, which
+breaks silently if the wording ever changes.
+
+The response gains a `reason` field alongside the existing `error` field (full shape above,
+under `POST /wars/:id/matchups/:mId/vote`) — `error` remains the human-readable string,
+unchanged; `reason` is the new machine-readable discriminator:
+
+| `CastVoteOutcome.kind` | `error` | `reason` |
+|---|---|---|
+| `'warNotActive'` | `"War is not active"` | `"war_not_active"` |
+| `'notJoined'` | `"voter has not joined this War"` | `"not_joined"` |
+
+This is scoped to the vote endpoint only. `POST /wars/:id/join`'s `403` (§11.2.1's `POST
+/wars/:id/join` above) has exactly one cause (`notActive`, via the shared `NotActive`
+outcome and `replyForOutcome`) and is unchanged — already unambiguous, nothing to
+discriminate.
 
 ---
 
@@ -1707,6 +1786,8 @@ nothing partially built.
   the API's own per-identity limits described here are not
 - Custom UI registry endpoints (§7.6, §10) — the `ui_registrations` table and `wars.ui_slug`
   column exist and are reserved; no endpoint reads or writes them yet
+- `contestant_count` on `WarSummary`, and the vote endpoint's `403` `reason` discriminator
+  (§11.2.1, "Addendum (2026-08-30)") — specified, not yet implemented
 
 None of the above is inferred to be in scope from the data model's presence — a reserved
 column or table does not mean its feature is built.
