@@ -101,6 +101,9 @@ services:
       - key: PUBLIC_BASE_URL
         scope: RUN_TIME
         value: https://staging.war.tmad.dev
+      - key: UI_ORIGINS
+        scope: RUN_TIME
+        value: https://staging.war.tmad.dev
       - key: S3_PUBLIC_BASE_URL
         scope: RUN_TIME
         value: https://staging.war.tmad.dev/media
